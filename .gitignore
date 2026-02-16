@@ -1,0 +1,17 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Local config
+config/config.json
+state.json
+
+# Runtime data
+data/raw/
+logs/
+_last_success.json
+_last_error.txt
+
+# macOS
+.DS_Store

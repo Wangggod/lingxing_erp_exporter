@@ -1,0 +1,17 @@
+{
+  "url": "https://example.com/login",
+  "username": "your_username",
+  "password": "your_password",
+  "selectors": {
+    "username_input": "#username",
+    "password_input": "#password",
+    "login_button": "#login-btn"
+  },
+  "api": {
+    "export_url": "https://example.com/api/export",
+    "download_url": "https://example.com/api/download",
+    "extra_params": {}
+  },
+  "download_wait_seconds": 10,
+  "headless": false
+}
