@@ -1,0 +1,15 @@
+{
+  "app_id": "cli_a914ced2fef95bdb",
+  "app_secret": "jHYBrUBtMH7v8n8omwMWEed4zdTdPgYU",
+  "spreadsheet_token": "",
+  "sheets": {
+    "order_list": {
+      "sheet_id": "",
+      "name": "订单列表"
+    },
+    "order_profit": {
+      "sheet_id": "",
+      "name": "订单利润"
+    }
+  }
+}

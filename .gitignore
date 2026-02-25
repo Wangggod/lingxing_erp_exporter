@@ -5,13 +5,18 @@ __pycache__/
 
 # Local config
 config/config.json
+config/feishu.json
+config/bitable.json
 state.json
 
 # Runtime data
-data/raw/
+data/
 logs/
 _last_success.json
 _last_error.txt
+
+# Backup files
+*.backup
 
 # macOS
 .DS_Store

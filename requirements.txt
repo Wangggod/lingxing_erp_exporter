@@ -1,1 +1,5 @@
 playwright>=1.40
+pandas>=2.0.0
+openpyxl>=3.0.0
+lark-oapi>=1.5.0
+tenacity>=9.0.0

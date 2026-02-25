@@ -1,67 +1,118 @@
-# Playwright Exporter
+# 领星数据自动化处理系统
 
-使用 Playwright 自动登录网站并导出文件的最小工具。
+自动化下载领星（Lingxing）电商数据，处理后上传到飞书多维表格的完整 ETL 系统。
 
-## 项目结构
+## 🎯 功能特性
+
+- ✅ 自动登录领星并下载每日数据
+- ✅ 按产品筛选和处理数据
+- ✅ 数据预处理（添加编号、日期标准化）
+- ✅ 按日期+国家维度聚合统计
+- ✅ 自动上传到飞书多维表格
+- ✅ 支持定时任务（macOS launchd）
+- ✅ 完整的日志记录
+- ✅ 数据自动清理
+
+## 📊 数据流程
 
 ```
-playwright-scraper/
-├── config/
-│   ├── config.example.json   # 配置模板
-│   └── config.json           # 实际配置（需自行创建，已 gitignore）
-├── scripts/
-│   ├── exporter.py           # 核心逻辑
-│   └── logger.py             # 日志配置
-├── data/raw/                 # 下载文件存放目录
-├── logs/                     # 运行日志
-├── state.json                # 浏览器登录状态（自动生成）
-├── main.py                   # 入口
-└── requirements.txt
+下载原始数据（main.py）
+    ↓
+筛选产品数据（process.py）
+    ↓
+预处理：添加编号和日期（preprocess.py）
+    ↓
+聚合：生成每日汇总表（aggregate.py）
+    ↓
+上传到飞书多维表格（upload_to_bitable.py）
 ```
 
-## 安装
+## 🚀 快速开始
+
+### 开发环境运行
 
 ```bash
-# 创建虚拟环境（推荐）
-python3.11 -m venv .venv
-source .venv/bin/activate
+# 1. 克隆或下载项目
+cd ~/Projects/playwright-scraper
 
-# 安装依赖
+# 2. 创建虚拟环境
+python3 -m venv venv
+source venv/bin/activate
+
+# 3. 安装依赖
 pip install -r requirements.txt
-
-# 安装浏览器（首次需要）
 playwright install chromium
-```
 
-## 配置
-
-```bash
+# 4. 配置
 cp config/config.example.json config/config.json
+cp config/feishu.example.json config/feishu.json
+cp config/bitable.example.json config/bitable.json
+
+# 编辑配置文件，填入实际信息
+nano config/config.json
+nano config/feishu.json
+nano config/bitable.json
+
+# 5. 运行
+./run_daily.sh
 ```
 
-编辑 `config/config.json`，填写目标网站的 URL、账号密码和页面元素选择器：
+### 生产环境部署
 
-| 字段 | 说明 |
-|------|------|
-| `url` | 登录页地址 |
-| `username` / `password` | 账号密码 |
-| `selectors.username_input` | 用户名输入框 CSS 选择器 |
-| `selectors.password_input` | 密码输入框 CSS 选择器 |
-| `selectors.login_button` | 登录按钮 CSS 选择器 |
-| `selectors.export_button` | 导出按钮 CSS 选择器 |
-| `download_timeout_ms` | 下载超时（毫秒），默认 60000 |
-| `headless` | 是否无头模式，默认 false |
+详见 [DEPLOYMENT.md](DEPLOYMENT.md)
 
-## 运行
+快速部署（在新的 Mac mini 上）：
+```bash
+./deployment/setup.sh
+```
+
+## 🔧 常用命令
+
+### 手动运行
 
 ```bash
-python main.py
+# 完整流程
+./run_daily.sh
+
+# 或分步执行
+python main.py              # 下载
+python process.py           # 筛选
+python preprocess.py        # 预处理
+python aggregate.py         # 聚合
+python upload_to_bitable.py # 上传
 ```
 
-首次运行会执行登录流程，成功后自动保存 `state.json`。后续运行会复用登录状态，跳过登录步骤。
+### 批量处理历史数据
 
-如果登录状态过期，删除 `state.json` 重新运行即可。
+```bash
+# 处理指定日期范围
+python batch_process.py --start 2026-02-01 --end 2026-02-22
+```
 
-## 日志
+### 数据清理
 
-运行日志保存在 `logs/export.log`，同时输出到终端。
+```bash
+# 试运行（查看将删除什么）
+python cleanup_old_data.py --days 30 --dry-run
+
+# 实际清理（保留最近 30 天）
+python cleanup_old_data.py --days 30
+```
+
+### 环境检查
+
+```bash
+python check_environment.py
+```
+
+## 📚 相关文档
+
+- [DEPLOYMENT.md](DEPLOYMENT.md) - 详细部署指南
+- [deployment/README.md](deployment/README.md) - 部署文件说明
+
+## 🆘 支持
+
+遇到问题？
+1. 运行环境检查：`python check_environment.py`
+2. 查看日志文件
+3. 参考 DEPLOYMENT.md 的故障排查部分

@@ -1,0 +1,6 @@
+{
+  "product": "半开猫砂盆",
+  "app_token": "你的多维表格app_token",
+  "table_id": "你的数据表table_id",
+  "url": "https://你的飞书域名.feishu.cn/base/你的app_token"
+}

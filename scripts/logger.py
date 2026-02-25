@@ -7,6 +7,11 @@ def setup_logger(name: str = "exporter") -> logging.Logger:
     log_dir.mkdir(exist_ok=True)
 
     logger = logging.getLogger(name)
+
+    # 如果 logger 已经有 handler，直接返回，避免重复添加
+    if logger.handlers:
+        return logger
+
     logger.setLevel(logging.DEBUG)
 
     fmt = logging.Formatter(

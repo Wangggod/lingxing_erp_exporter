@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- 任务标识符 -->
+    <key>Label</key>
+    <string>com.lingxing.etl</string>
+
+    <!-- 工作目录（修改为实际路径） -->
+    <key>WorkingDirectory</key>
+    <string>/Users/YOUR_USERNAME/Projects/playwright-scraper</string>
+
+    <!-- 运行的程序（修改为实际路径） -->
+    <key>Program</key>
+    <string>/Users/YOUR_USERNAME/Projects/playwright-scraper/run_daily.sh</string>
+
+    <!-- 标准输出日志 -->
+    <key>StandardOutPath</key>
+    <string>/Users/YOUR_USERNAME/Library/Logs/lingxing-etl.log</string>
+
+    <!-- 错误输出日志 -->
+    <key>StandardErrorPath</key>
+    <string>/Users/YOUR_USERNAME/Library/Logs/lingxing-etl-error.log</string>
+
+    <!-- 定时执行：每天凌晨 2:00 -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>2</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- 如果任务失败后自动重启（可选） -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- 环境变量（可选） -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <!-- 成功退出后不重启 -->
+    <key>SuccessfulExit</key>
+    <false/>
+
+    <!-- 保持任务加载 -->
+    <key>KeepAlive</key>
+    <false/>
+
+</dict>
+</plist>

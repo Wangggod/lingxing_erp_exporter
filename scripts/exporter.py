@@ -216,7 +216,7 @@ def _fallback_click_download(page: Page, name: str) -> str:
 
 # ── 下载 ─────────────────────────────────────────────
 
-def download_report(page: Page, cfg: dict, report_id: str, report_name: str, target_date: str) -> Path:
+def download_report(page: Page, cfg: dict, report_id: str, report_name: str, report_type: str, target_date: str) -> Path:
     download_url = cfg["download_url"]
     wait = cfg.get("download_wait_seconds", 10)
 
@@ -225,13 +225,17 @@ def download_report(page: Page, cfg: dict, report_id: str, report_name: str, tar
 
     url = f"{download_url}?report_id={report_id}"
 
-    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    # 创建按日期的子目录
+    date_dir = DOWNLOAD_DIR / target_date
+    date_dir.mkdir(parents=True, exist_ok=True)
+
     with page.expect_download(timeout=60000) as dl_info:
         page.evaluate("url => window.open(url)", url)
     download = dl_info.value
 
-    filename = download.suggested_filename or f"{report_name}_{target_date}.xlsx"
-    dest = DOWNLOAD_DIR / filename
+    # 使用固定的文件名：order_profit.xlsx 或 order_list.xlsx
+    filename = f"{report_type}.xlsx"
+    dest = date_dir / filename
     download.save_as(str(dest))
     log.info("[%s] 文件已保存: %s", report_name, dest)
     return dest
@@ -246,7 +250,8 @@ _EXPORT_HANDLERS = {
 }
 
 
-def run() -> None:
+def run_for_date(target_date: str) -> None:
+    """指定日期执行导出任务"""
     cfg = load_config()
     log.info("开始执行导出任务")
 
@@ -258,7 +263,6 @@ def run() -> None:
             _ensure_logged_in(page, ctx, cfg)
             _navigate_to_app(page, cfg)
 
-            target_date = get_target_date()
             log.info("目标日期: %s", target_date)
 
             for report in cfg["reports"]:
@@ -271,7 +275,7 @@ def run() -> None:
 
                 log.info("[%s] 开始导出...", name)
                 report_id = handler(page, report, target_date)
-                download_report(page, cfg, report_id, name, target_date)
+                download_report(page, cfg, report_id, name, rtype, target_date)
 
         except Exception:
             log.exception("任务执行失败")
@@ -280,3 +284,9 @@ def run() -> None:
             ctx.close()
 
     log.info("全部任务完成")
+
+
+def run() -> None:
+    """使用默认日期（昨天）执行导出任务"""
+    target_date = get_target_date()
+    run_for_date(target_date)
