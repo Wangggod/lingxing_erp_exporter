@@ -31,6 +31,29 @@ error() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $1" | tee -a "$ERROR_LOG"
 }
 
+# ==================== 兜底机制 ====================
+
+# 每日完成标记文件（按日期命名）
+TODAY=$(date +%Y-%m-%d)
+MARKER_FILE="$HOME/.lingxing_etl_${TODAY}.done"
+
+# 检查当前时间是否已到 16:30
+CURRENT_HOUR=$(date +%H)
+CURRENT_MINUTE=$(date +%M)
+if [ "$CURRENT_HOUR" -lt 16 ] || { [ "$CURRENT_HOUR" -eq 16 ] && [ "$CURRENT_MINUTE" -lt 30 ]; }; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 当前时间早于 16:30，跳过" | tee -a "$LOG_FILE"
+    exit 0
+fi
+
+# 今天已执行过，跳过
+if [ -f "$MARKER_FILE" ]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 今天已执行完成，跳过（标记: $MARKER_FILE）" | tee -a "$LOG_FILE"
+    exit 0
+fi
+
+# 清理 7 天前的旧标记文件
+find "$HOME" -maxdepth 1 -name ".lingxing_etl_*.done" -mtime +7 -delete 2>/dev/null
+
 # ==================== 主流程 ====================
 
 log "=========================================="
@@ -118,7 +141,10 @@ fi
 #     error "清理失败（非关键错误，继续）"
 # fi
 
-# 6. 完成
+# 6. 写入今日完成标记
+touch "$MARKER_FILE"
+
+# 7. 完成
 log "=========================================="
 log "🎉 每日数据处理任务完成"
 log "=========================================="
