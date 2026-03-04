@@ -15,6 +15,15 @@ DOWNLOAD_DIR = ROOT / "data" / "raw"
 log = setup_logger()
 
 
+class SessionExpiredError(RuntimeError):
+    """服务端会话失效，需要重新登录。"""
+
+
+def _is_session_expired(result: dict) -> bool:
+    """判断 API 返回是否为网关会话失效错误。"""
+    return result.get("code") == 8000 and result.get("subMsg") == "gw"
+
+
 def get_target_date() -> str:
     """取美西时间当前日期的前一天，返回 YYYY-MM-DD。"""
     now_shanghai = datetime.now(ZoneInfo("Asia/Shanghai"))
@@ -151,6 +160,9 @@ def export_order_profit(page: Page, report: dict, target_date: str) -> str:
 
     result = _xhr_post_with_retry(page, report["export_url"], body)
 
+    if _is_session_expired(result):
+        raise SessionExpiredError(f"[{report['name']}] 会话已失效，需要重新登录: {result}")
+
     if result.get("code") != 1:
         raise RuntimeError(f"[{report['name']}] 导出任务创建失败: {result}")
 
@@ -177,6 +189,9 @@ def export_order_list(page: Page, report: dict, target_date: str) -> str:
     }
 
     result = _xhr_post_with_retry(page, report["export_url"], body)
+
+    if _is_session_expired(result):
+        raise SessionExpiredError(f"[{report['name']}] 会话已失效，需要重新登录: {result}")
 
     if result.get("code") != 1:
         raise RuntimeError(f"[{report['name']}] 导出任务创建失败: {result}")
@@ -250,38 +265,49 @@ _EXPORT_HANDLERS = {
 }
 
 
+def _run_exports(page: Page, cfg: dict, target_date: str) -> None:
+    """执行所有报表导出，抽取为独立函数方便重试。"""
+    log.info("目标日期: %s", target_date)
+    for report in cfg["reports"]:
+        name = report["name"]
+        rtype = report["type"]
+        handler = _EXPORT_HANDLERS.get(rtype)
+        if not handler:
+            log.error("[%s] 未知报表类型: %s，跳过", name, rtype)
+            continue
+
+        log.info("[%s] 开始导出...", name)
+        report_id = handler(page, report, target_date)
+        download_report(page, cfg, report_id, name, rtype, target_date)
+
+
 def run_for_date(target_date: str) -> None:
-    """指定日期执行导出任务"""
+    """指定日期执行导出任务，会话失效时自动重新登录重试一次。"""
     cfg = load_config()
     log.info("开始执行导出任务")
 
-    with sync_playwright() as pw:
-        ctx = _create_context(pw, cfg)
-        page = ctx.new_page()
-
-        try:
-            _ensure_logged_in(page, ctx, cfg)
-            _navigate_to_app(page, cfg)
-
-            log.info("目标日期: %s", target_date)
-
-            for report in cfg["reports"]:
-                name = report["name"]
-                rtype = report["type"]
-                handler = _EXPORT_HANDLERS.get(rtype)
-                if not handler:
-                    log.error("[%s] 未知报表类型: %s，跳过", name, rtype)
+    for attempt in range(2):
+        with sync_playwright() as pw:
+            ctx = _create_context(pw, cfg)
+            page = ctx.new_page()
+            try:
+                _ensure_logged_in(page, ctx, cfg)
+                _navigate_to_app(page, cfg)
+                _run_exports(page, cfg, target_date)
+                break  # 成功，退出重试循环
+            except SessionExpiredError:
+                if attempt == 0:
+                    log.warning("检测到会话失效，清除登录状态后重试...")
+                    if STATE_FILE.exists():
+                        STATE_FILE.unlink()
                     continue
-
-                log.info("[%s] 开始导出...", name)
-                report_id = handler(page, report, target_date)
-                download_report(page, cfg, report_id, name, rtype, target_date)
-
-        except Exception:
-            log.exception("任务执行失败")
-            raise
-        finally:
-            ctx.close()
+                log.error("重新登录后仍然失败，放弃重试")
+                raise
+            except Exception:
+                log.exception("任务执行失败")
+                raise
+            finally:
+                ctx.close()
 
     log.info("全部任务完成")
 
