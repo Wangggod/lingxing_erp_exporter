@@ -1,16 +1,179 @@
 """数据聚合模块：将订单列表和订单利润聚合为汇总表"""
 
 import pandas as pd
+from datetime import datetime, timedelta
 from pathlib import Path
 from scripts.logger import setup_logger
 
 log = setup_logger()
 
 
+def get_coupon_face_value(
+    promo_code: str,
+    current_df: pd.DataFrame,
+    product_dir: Path,
+    date_str: str,
+    lookback_days: int = 4
+) -> float:
+    """
+    查找某个促销编码对应的优惠券面额。
+
+    优先从当天数据中找 Shipped 订单，找不到则往前查最多 lookback_days 天。
+    Shipped 订单的 促销费-商品折扣 即为该优惠券的真实面额。
+
+    Returns:
+        优惠券面额，找不到时返回 0.0
+    """
+    def find_in_df(df: pd.DataFrame) -> float:
+        shipped = df[
+            (df['促销编码'] == promo_code) &
+            (df['订单状态'] == 'Shipped') &
+            (df['促销费-商品折扣'] > 0)
+        ]['促销费-商品折扣']
+        return float(shipped.iloc[0]) if len(shipped) > 0 else 0.0
+
+    # 先在当天数据中找
+    value = find_in_df(current_df)
+    if value > 0:
+        return value
+
+    # 往历史查找：product_dir = data/processed/{date}/feishu-ready/{product}
+    processed_base = product_dir.parent.parent.parent
+    product_name = product_dir.name
+    date = datetime.strptime(date_str, '%Y-%m-%d')
+
+    for i in range(1, lookback_days + 1):
+        prev_date = (date - timedelta(days=i)).strftime('%Y-%m-%d')
+        prev_path = processed_base / prev_date / "feishu-ready" / product_name / "order_list_ready.csv"
+        if prev_path.exists():
+            prev_df = pd.read_csv(prev_path)
+            value = find_in_df(prev_df)
+            if value > 0:
+                log.info(f"优惠券 [{promo_code}] 面额 {value}，来自历史数据 {prev_date}")
+                return value
+
+    log.warning(f"优惠券 [{promo_code}] 未找到 Shipped 订单，面额按 0 处理")
+    return 0.0
+
+
+def get_fba_fee_per_unit(
+    msku: str,
+    current_df: pd.DataFrame,
+    product_dir: Path,
+    date_str: str,
+    lookback_days: int = 4
+) -> float:
+    """
+    查找某个 MSKU 对应的 FBA 费用（每件）。
+
+    仅从 Shipped + AFN 订单中读取已结算的 FBA费，计算单件费用。
+    优先当天，找不到则往前查最多 lookback_days 天。
+
+    Returns:
+        每件 FBA 费用（正数），找不到时返回 0.0
+    """
+    def find_in_df(df: pd.DataFrame) -> float:
+        shipped = df[
+            (df['MSKU'] == msku) &
+            (df['订单类型'] == 'AFN') &
+            (df['订单状态'] == 'Shipped') &
+            (df['FBA费'] != 0)
+        ]
+        if len(shipped) > 0:
+            row = shipped.iloc[0]
+            qty = max(int(row['数量']), 1)
+            return abs(float(row['FBA费'])) / qty
+        return 0.0
+
+    value = find_in_df(current_df)
+    if value > 0:
+        return value
+
+    processed_base = product_dir.parent.parent.parent
+    product_name = product_dir.name
+    date = datetime.strptime(date_str, '%Y-%m-%d')
+
+    for i in range(1, lookback_days + 1):
+        prev_date = (date - timedelta(days=i)).strftime('%Y-%m-%d')
+        prev_path = processed_base / prev_date / "feishu-ready" / product_name / "order_list_ready.csv"
+        if prev_path.exists():
+            prev_df = pd.read_csv(prev_path)
+            value = find_in_df(prev_df)
+            if value > 0:
+                log.info(f"MSKU [{msku}] FBA费/件 {value}，来自历史数据 {prev_date}")
+                return value
+
+    log.warning(f"MSKU [{msku}] 未找到 Shipped AFN 订单，FBA费按 0 处理")
+    return 0.0
+
+
+def get_commission_per_unit(
+    msku: str,
+    order_type: str,
+    current_df: pd.DataFrame,
+    product_dir: Path,
+    date_str: str,
+    lookback_days: int = 4
+) -> float:
+    """
+    查找某个 MSKU 对应的单件平台佣金。
+
+    仅从 Shipped 且订单类型匹配的订单读取已结算的 平台费，计算单件佣金。
+    同时校验佣金率不超过 15%（超过则为异常）。
+    优先当天，找不到则往前查最多 lookback_days 天。
+
+    Returns:
+        单件平台佣金（正数），找不到时返回 0.0
+    """
+    def find_in_df(df: pd.DataFrame) -> float:
+        shipped = df[
+            (df['MSKU'] == msku) &
+            (df['订单类型'] == order_type) &
+            (df['订单状态'] == 'Shipped') &
+            (df['平台费'] != 0)
+        ]
+        if len(shipped) > 0:
+            row = shipped.iloc[0]
+            qty = max(int(row['数量']), 1)
+            per_unit = abs(float(row['平台费'])) / qty
+            # 异常校验：佣金率不应超过 15%
+            if row['单价'] > 0:
+                rate = per_unit / float(row['单价'])
+                if rate > 0.15:
+                    log.warning(
+                        f"MSKU [{msku}] 佣金率异常 {rate:.2%}（超过15%），"
+                        f"平台费={row['平台费']} 单价={row['单价']}，请人工核查"
+                    )
+            return per_unit
+        return 0.0
+
+    value = find_in_df(current_df)
+    if value > 0:
+        return value
+
+    processed_base = product_dir.parent.parent.parent
+    product_name = product_dir.name
+    date = datetime.strptime(date_str, '%Y-%m-%d')
+
+    for i in range(1, lookback_days + 1):
+        prev_date = (date - timedelta(days=i)).strftime('%Y-%m-%d')
+        prev_path = processed_base / prev_date / "feishu-ready" / product_name / "order_list_ready.csv"
+        if prev_path.exists():
+            prev_df = pd.read_csv(prev_path)
+            value = find_in_df(prev_df)
+            if value > 0:
+                log.info(f"MSKU [{msku}] 佣金/件 {value}，来自历史数据 {prev_date}")
+                return value
+
+    log.warning(f"MSKU [{msku}] 订单类型 [{order_type}] 未找到 Shipped 订单，平台佣金按 0 处理")
+    return 0.0
+
+
 def aggregate_daily_data(
     order_list_csv: Path,
     order_profit_csv: Path,
-    output_path: Path = None
+    output_path: Path = None,
+    date_str: str = None
 ) -> pd.DataFrame:
     """
     聚合每日数据，按日期-国家汇总。
@@ -54,8 +217,50 @@ def aggregate_daily_data(
     list_agg['FBM订单'] = fbm_orders
 
     # FBA订单（订单类型 = AFN）
-    fba_orders = valid_orders[valid_orders['订单类型'] == 'AFN'].groupby(['站点日期', '国家'])['数量'].sum()
+    afn_orders = valid_orders[valid_orders['订单类型'] == 'AFN']
+    fba_orders = afn_orders.groupby(['站点日期', '国家'])['数量'].sum()
     list_agg['FBA订单'] = fba_orders
+
+    # 总FBA费：订单自带非零值则直接用（Pending 亦然），为 0 才去历史查
+    product_dir = order_list_csv.parent
+    fba_fee_map = {}
+    if date_str and len(afn_orders) > 0:
+        for (date, country), group in afn_orders.groupby(['站点日期', '国家']):
+            total_fee = 0.0
+            for _, row in group.iterrows():
+                if row['FBA费'] != 0:
+                    total_fee += abs(float(row['FBA费']))
+                else:
+                    fee_per_unit = get_fba_fee_per_unit(row['MSKU'], list_df, product_dir, date_str)
+                    total_fee += fee_per_unit * int(row['数量'])
+            fba_fee_map[(date, country)] = total_fee
+
+    if fba_fee_map:
+        idx = pd.MultiIndex.from_tuples(fba_fee_map.keys(), names=['站点日期', '国家'])
+        list_agg['总FBA费'] = pd.Series(fba_fee_map.values(), index=idx)
+    else:
+        list_agg['总FBA费'] = 0.0
+
+    # 总平台佣金：订单自带非零值则直接用（Pending 亦然），为 0 才去历史查
+    commission_map = {}
+    if date_str and len(valid_orders) > 0:
+        for (date, country), group in valid_orders.groupby(['站点日期', '国家']):
+            total_commission = 0.0
+            for _, row in group.iterrows():
+                if row['平台费'] != 0:
+                    total_commission += abs(float(row['平台费']))
+                else:
+                    per_unit = get_commission_per_unit(
+                        row['MSKU'], row['订单类型'], list_df, product_dir, date_str
+                    )
+                    total_commission += per_unit * int(row['数量'])
+            commission_map[(date, country)] = total_commission
+
+    if commission_map:
+        idx = pd.MultiIndex.from_tuples(commission_map.keys(), names=['站点日期', '国家'])
+        list_agg['总平台佣金'] = pd.Series(commission_map.values(), index=idx)
+    else:
+        list_agg['总平台佣金'] = 0.0
 
     # 总销售额（单价求和，排除 Canceled、换货和退货）
     valid_sales = list_df[
@@ -67,13 +272,33 @@ def aggregate_daily_data(
     list_agg['总销售额'] = total_sales
 
     # 优惠券订单数（促销编码不为空，排除 Canceled、换货和退货）
-    coupon_orders = valid_sales[valid_sales['促销编码'].notna() & (valid_sales['促销编码'] != '')].groupby(['站点日期', '国家']).size()
+    coupon_df = valid_sales[valid_sales['促销编码'].notna() & (valid_sales['促销编码'] != '')]
+    coupon_orders = coupon_df.groupby(['站点日期', '国家']).size()
     list_agg['优惠券订单数'] = coupon_orders
+
+    # 优惠券折扣总额：按 日期-国家 分组，再按促销编码算 次数 × 面额
+    coupon_discount_map = {}
+    if date_str and len(coupon_df) > 0:
+        for (date, country), group in coupon_df.groupby(['站点日期', '国家']):
+            total_discount = 0.0
+            for promo_code, code_group in group.groupby('促销编码'):
+                face_value = get_coupon_face_value(promo_code, list_df, product_dir, date_str)
+                total_discount += len(code_group) * face_value
+            coupon_discount_map[(date, country)] = total_discount
+
+    if coupon_discount_map:
+        idx = pd.MultiIndex.from_tuples(coupon_discount_map.keys(), names=['站点日期', '国家'])
+        list_agg['优惠券折扣总额'] = pd.Series(coupon_discount_map.values(), index=idx)
+    else:
+        list_agg['优惠券折扣总额'] = 0.0
 
     # 填充缺失值为 0
     list_agg['FBM订单'] = list_agg['FBM订单'].fillna(0).astype(int)
     list_agg['FBA订单'] = list_agg['FBA订单'].fillna(0).astype(int)
+    list_agg['总FBA费'] = list_agg['总FBA费'].fillna(0)
+    list_agg['总平台佣金'] = list_agg['总平台佣金'].fillna(0)
     list_agg['优惠券订单数'] = list_agg['优惠券订单数'].fillna(0).astype(int)
+    list_agg['优惠券折扣总额'] = list_agg['优惠券折扣总额'].fillna(0)
 
     # ========== 从 order_profit 聚合 ==========
 
@@ -111,6 +336,12 @@ def aggregate_daily_data(
     result['FBA订单'] = result['FBA订单'].fillna(0).astype(int)
     result['总销售额'] = result['总销售额'].fillna(0)
     result['优惠券订单数'] = result['优惠券订单数'].fillna(0).astype(int)
+    result['优惠券折扣总额'] = result['优惠券折扣总额'].fillna(0)
+    result['总FBA费'] = result['总FBA费'].fillna(0)
+    result['总平台佣金'] = result['总平台佣金'].fillna(0)
+
+    # 实际销售额 = 总销售额 - 优惠券折扣总额
+    result['实际销售额'] = result['总销售额'] - result['优惠券折扣总额']
 
     # 重置索引
     result = result.reset_index()
@@ -119,7 +350,8 @@ def aggregate_daily_data(
     columns_order = [
         '站点日期', '国家', '货币',
         '总销量', 'FBM订单', 'FBA订单', '广告单',
-        '总销售额', '优惠券订单数', '总广告花费',
+        '总销售额', '优惠券订单数', '优惠券折扣总额', '实际销售额',
+        '总平台佣金', '总FBA费', '总广告花费',
         '今日退款数量', '今日退款金额'
     ]
     result = result[columns_order]
@@ -171,7 +403,7 @@ def aggregate_product_data(
     log.info(f"开始聚合数据 - 日期: {date_str}")
     log.info("=" * 60)
 
-    result_df = aggregate_daily_data(order_list_csv, order_profit_csv, output_path)
+    result_df = aggregate_daily_data(order_list_csv, order_profit_csv, output_path, date_str=date_str)
 
     log.info("=" * 60)
     log.info("聚合结果预览:")
