@@ -67,29 +67,29 @@ def get_fba_fee_per_unit(
     """
     查找某个 MSKU 对应的 FBA 费用（每件）。
 
-    仅从 Shipped + AFN 订单中读取已结算的 FBA费，计算单件费用。
-    优先当天，找不到则往前查最多 lookback_days 天。
+    从当天 + 历史 Shipped AFN 订单收集所有非零 FBA 费，取中位数以过滤异常值。
 
     Returns:
         每件 FBA 费用（正数），找不到时返回 0.0
     """
-    def find_in_df(df: pd.DataFrame) -> float:
+    def collect_from_df(df: pd.DataFrame) -> list:
+        """收集所有匹配的单件 FBA 费用"""
         shipped = df[
             (df['MSKU'] == msku) &
             (df['订单类型'] == 'AFN') &
             (df['订单状态'] == 'Shipped') &
             (df['FBA费'] != 0)
         ]
-        if len(shipped) > 0:
-            row = shipped.iloc[0]
+        values = []
+        for _, row in shipped.iterrows():
             qty = max(int(row['数量']), 1)
-            return abs(float(row['FBA费'])) / qty
-        return 0.0
+            values.append(abs(float(row['FBA费'])) / qty)
+        return values
 
-    value = find_in_df(current_df)
-    if value > 0:
-        return value
+    # 收集当天所有值
+    all_values = collect_from_df(current_df)
 
+    # 往历史查找补充数据
     processed_base = product_dir.parent.parent.parent
     product_name = product_dir.name
     date = datetime.strptime(date_str, '%Y-%m-%d')
@@ -99,10 +99,12 @@ def get_fba_fee_per_unit(
         prev_path = processed_base / prev_date / "feishu-ready" / product_name / "order_list_ready.csv"
         if prev_path.exists():
             prev_df = pd.read_csv(prev_path)
-            value = find_in_df(prev_df)
-            if value > 0:
-                log.info(f"MSKU [{msku}] FBA费/件 {value}，来自历史数据 {prev_date}")
-                return value
+            all_values.extend(collect_from_df(prev_df))
+
+    if all_values:
+        median = sorted(all_values)[len(all_values) // 2]
+        log.info(f"MSKU [{msku}] FBA费/件中位数 {median:.2f}（共 {len(all_values)} 个数据点）")
+        return median
 
     log.warning(f"MSKU [{msku}] 未找到 Shipped AFN 订单，FBA费按 0 处理")
     return 0.0
@@ -119,39 +121,31 @@ def get_commission_per_unit(
     """
     查找某个 MSKU 对应的单件平台佣金。
 
-    仅从 Shipped 且订单类型匹配的订单读取已结算的 平台费，计算单件佣金。
-    同时校验佣金率不超过 15%（超过则为异常）。
-    优先当天，找不到则往前查最多 lookback_days 天。
+    从当天 + 历史 Shipped 订单收集所有非零平台费，取中位数以过滤异常值。
+    同时校验中位数佣金率不超过 15%（超过则警告）。
 
     Returns:
         单件平台佣金（正数），找不到时返回 0.0
     """
-    def find_in_df(df: pd.DataFrame) -> float:
+    def collect_from_df(df: pd.DataFrame) -> list:
+        """收集所有匹配的单件佣金及单价"""
         shipped = df[
             (df['MSKU'] == msku) &
             (df['订单类型'] == order_type) &
             (df['订单状态'] == 'Shipped') &
             (df['平台费'] != 0)
         ]
-        if len(shipped) > 0:
-            row = shipped.iloc[0]
+        values = []
+        for _, row in shipped.iterrows():
             qty = max(int(row['数量']), 1)
             per_unit = abs(float(row['平台费'])) / qty
-            # 异常校验：佣金率不应超过 15%
-            if row['单价'] > 0:
-                rate = per_unit / float(row['单价'])
-                if rate > 0.15:
-                    log.warning(
-                        f"MSKU [{msku}] 佣金率异常 {rate:.2%}（超过15%），"
-                        f"平台费={row['平台费']} 单价={row['单价']}，请人工核查"
-                    )
-            return per_unit
-        return 0.0
+            values.append((per_unit, float(row['单价'])))
+        return values
 
-    value = find_in_df(current_df)
-    if value > 0:
-        return value
+    # 收集当天所有值
+    all_values = collect_from_df(current_df)
 
+    # 往历史查找补充数据
     processed_base = product_dir.parent.parent.parent
     product_name = product_dir.name
     date = datetime.strptime(date_str, '%Y-%m-%d')
@@ -161,10 +155,24 @@ def get_commission_per_unit(
         prev_path = processed_base / prev_date / "feishu-ready" / product_name / "order_list_ready.csv"
         if prev_path.exists():
             prev_df = pd.read_csv(prev_path)
-            value = find_in_df(prev_df)
-            if value > 0:
-                log.info(f"MSKU [{msku}] 佣金/件 {value}，来自历史数据 {prev_date}")
-                return value
+            all_values.extend(collect_from_df(prev_df))
+
+    if all_values:
+        per_units = [v[0] for v in all_values]
+        median = sorted(per_units)[len(per_units) // 2]
+        # 异常校验：用中位数佣金率检查
+        prices = [v[1] for v in all_values if v[1] > 0]
+        if prices:
+            median_price = sorted(prices)[len(prices) // 2]
+            if median_price > 0:
+                rate = median / median_price
+                if rate > 0.15:
+                    log.warning(
+                        f"MSKU [{msku}] 佣金率异常 {rate:.2%}（超过15%），"
+                        f"中位数佣金={median:.2f} 中位数单价={median_price:.2f}，请人工核查"
+                    )
+        log.info(f"MSKU [{msku}] 佣金/件中位数 {median:.2f}（共 {len(all_values)} 个数据点）")
+        return median
 
     log.warning(f"MSKU [{msku}] 订单类型 [{order_type}] 未找到 Shipped 订单，平台佣金按 0 处理")
     return 0.0
