@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 from scripts.aggregator import aggregate_product_data
+from scripts.fbm_rates import update_rates
 from scripts.logger import setup_logger
 
 log = setup_logger()
@@ -26,6 +27,15 @@ def main():
     target_date = get_target_date()
 
     log.info(f"开始聚合数据 - 日期: {target_date}, 产品: {PRODUCT_NAME}")
+
+    # 先用自发货订单数据更新 FBM 运费费率表
+    RAW_DIR = ROOT / "data" / "raw"
+    fbm_shipment_path = RAW_DIR / target_date / "fbm_shipment.xlsx"
+    if fbm_shipment_path.exists():
+        log.info("更新 FBM 运费费率表...")
+        update_rates(fbm_shipment_path)
+    else:
+        log.info(f"无自发货订单文件 ({fbm_shipment_path})，跳过费率更新")
 
     # 预处理后的数据目录
     feishu_ready_dir = PROCESSED_DIR / target_date / "feishu-ready" / PRODUCT_NAME

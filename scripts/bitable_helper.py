@@ -199,6 +199,7 @@ def create_summary_bitable(product_name: str, config: dict = None) -> dict:
         ("总广告花费", 2),    # 数字
         ("今日退款数量", 2),  # 数字
         ("今日退款金额", 2),  # 数字
+        ("FBM运费", 2),       # 数字
     ]
 
     for field_name, field_type in fields:

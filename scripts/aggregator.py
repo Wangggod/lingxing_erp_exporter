@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from pathlib import Path
 from scripts.logger import setup_logger
+from scripts.fbm_rates import get_estimated_shipping
 
 log = setup_logger()
 
@@ -262,6 +263,23 @@ def aggregate_daily_data(
     else:
         list_agg['总平台佣金'] = 0.0
 
+    # FBM运费预估：对每个 FBM 订单，按 国家+MSKU 查费率表取历史均值
+    fbm_orders = valid_orders[valid_orders['订单类型'] == 'MFN']
+    fbm_shipping_map = {}
+    if len(fbm_orders) > 0:
+        for (date, country), group in fbm_orders.groupby(['站点日期', '国家']):
+            total_shipping = 0.0
+            for _, row in group.iterrows():
+                per_unit = get_estimated_shipping(country, row['MSKU'])
+                total_shipping += per_unit * max(int(row['数量']), 1)
+            fbm_shipping_map[(date, country)] = round(total_shipping, 2)
+
+    if fbm_shipping_map:
+        idx = pd.MultiIndex.from_tuples(fbm_shipping_map.keys(), names=['站点日期', '国家'])
+        list_agg['FBM运费'] = pd.Series(fbm_shipping_map.values(), index=idx)
+    else:
+        list_agg['FBM运费'] = 0.0
+
     # 总销售额（单价求和，排除 Canceled、换货和退货）
     valid_sales = list_df[
         (list_df['订单状态'] != 'Canceled') &
@@ -299,6 +317,7 @@ def aggregate_daily_data(
     list_agg['总平台佣金'] = list_agg['总平台佣金'].fillna(0)
     list_agg['优惠券订单数'] = list_agg['优惠券订单数'].fillna(0).astype(int)
     list_agg['优惠券折扣总额'] = list_agg['优惠券折扣总额'].fillna(0)
+    list_agg['FBM运费'] = list_agg['FBM运费'].fillna(0)
 
     # ========== 从 order_profit 聚合 ==========
 
@@ -339,6 +358,7 @@ def aggregate_daily_data(
     result['优惠券折扣总额'] = result['优惠券折扣总额'].fillna(0)
     result['总FBA费'] = result['总FBA费'].fillna(0)
     result['总平台佣金'] = result['总平台佣金'].fillna(0)
+    result['FBM运费'] = result['FBM运费'].fillna(0)
 
     # 实际销售额 = 总销售额 - 优惠券折扣总额
     result['实际销售额'] = result['总销售额'] - result['优惠券折扣总额']
@@ -352,7 +372,7 @@ def aggregate_daily_data(
         '总销量', 'FBM订单', 'FBA订单', '广告单',
         '总销售额', '优惠券订单数', '优惠券折扣总额', '实际销售额',
         '总平台佣金', '总FBA费', '总广告花费',
-        '今日退款数量', '今日退款金额'
+        '今日退款数量', '今日退款金额', 'FBM运费'
     ]
     result = result[columns_order]
 
