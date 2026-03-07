@@ -178,6 +178,55 @@ def get_commission_per_unit(
     return 0.0
 
 
+def get_unit_cost(
+    country: str,
+    cost_field: str,
+    current_profit_df: pd.DataFrame,
+    product_dir: Path,
+    date_str: str,
+    lookback_days: int = 4
+) -> float:
+    """
+    通用：从 profit 表获取单件成本（采购均价/头程均价），按国家取中位数回填。
+
+    从当天 profit 表收集同国家、指定字段 > 0 的所有值，不够则往历史 lookback。
+
+    Returns:
+        单件成本中位数，找不到时返回 0.0
+    """
+    def collect_from_df(df: pd.DataFrame) -> list:
+        """收集同国家所有非零值"""
+        matched = df[
+            (df['国家'] == country) &
+            (df[cost_field].notna()) &
+            (df[cost_field] > 0)
+        ]
+        return [float(v) for v in matched[cost_field]]
+
+    # 收集当天所有值
+    all_values = collect_from_df(current_profit_df)
+
+    # 往历史查找补充数据
+    processed_base = product_dir.parent.parent.parent
+    product_name = product_dir.name
+    date = datetime.strptime(date_str, '%Y-%m-%d')
+
+    for i in range(1, lookback_days + 1):
+        prev_date = (date - timedelta(days=i)).strftime('%Y-%m-%d')
+        prev_path = processed_base / prev_date / "feishu-ready" / product_name / "order_profit_ready.csv"
+        if prev_path.exists():
+            prev_df = pd.read_csv(prev_path)
+            all_values.extend(collect_from_df(prev_df))
+
+    if all_values:
+        median = sorted(all_values)[len(all_values) // 2]
+        log.info(f"国家 [{country}] {cost_field}中位数 {median:.2f}（共 {len(all_values)} 个数据点）")
+        return median
+
+    log.warning(f"国家 [{country}] 未找到 {cost_field} > 0 的记录，按 0 处理")
+    return 0.0
+
+
 def aggregate_daily_data(
     order_list_csv: Path,
     order_profit_csv: Path,
@@ -343,6 +392,44 @@ def aggregate_daily_data(
         '退款金额': '今日退款金额'
     })
 
+    # ========== 采购成本 / 头程成本聚合 ==========
+
+    purchase_cost_map = {}
+    freight_cost_map = {}
+    if date_str and len(profit_df) > 0:
+        for (date, country), group in profit_df.groupby(['站点日期', '国家']):
+            total_purchase = 0.0
+            total_freight = 0.0
+            for _, row in group.iterrows():
+                qty = max(int(row['销量']), 0)
+                if qty == 0:
+                    continue
+
+                # 采购均价
+                purchase_unit = float(row['采购均价']) if row['采购均价'] > 0 else \
+                    get_unit_cost(country, '采购均价', profit_df, product_dir, date_str)
+                total_purchase += purchase_unit * qty
+
+                # 头程均价
+                freight_unit = float(row['头程均价']) if row['头程均价'] > 0 else \
+                    get_unit_cost(country, '头程均价', profit_df, product_dir, date_str)
+                total_freight += freight_unit * qty
+
+            purchase_cost_map[(date, country)] = round(total_purchase, 2)
+            freight_cost_map[(date, country)] = round(total_freight, 2)
+
+    if purchase_cost_map:
+        idx = pd.MultiIndex.from_tuples(purchase_cost_map.keys(), names=['站点日期', '国家'])
+        profit_agg['总采购成本'] = pd.Series(purchase_cost_map.values(), index=idx)
+    else:
+        profit_agg['总采购成本'] = 0.0
+
+    if freight_cost_map:
+        idx = pd.MultiIndex.from_tuples(freight_cost_map.keys(), names=['站点日期', '国家'])
+        profit_agg['总头程成本'] = pd.Series(freight_cost_map.values(), index=idx)
+    else:
+        profit_agg['总头程成本'] = 0.0
+
     # ========== 合并 ==========
 
     result = list_agg.join(profit_agg, how='outer')
@@ -367,9 +454,18 @@ def aggregate_daily_data(
     result['总FBA费'] = result['总FBA费'].fillna(0)
     result['总平台佣金'] = result['总平台佣金'].fillna(0)
     result['FBM运费'] = result['FBM运费'].fillna(0)
+    result['总采购成本'] = result['总采购成本'].fillna(0)
+    result['总头程成本'] = result['总头程成本'].fillna(0)
 
     # 实际销售额 = 总销售额 - 优惠券折扣总额
     result['实际销售额'] = result['总销售额'] - result['优惠券折扣总额']
+
+    # 回款 = 实际销售额 - 广告 - 佣金 - FBA费 - FBM运费
+    result['回款'] = (result['实际销售额'] - result['总广告花费']
+                     - result['总平台佣金'] - result['总FBA费'] - result['FBM运费'])
+
+    # 利润 = 回款 - 采购 - 头程
+    result['利润'] = result['回款'] - result['总采购成本'] - result['总头程成本']
 
     # 重置索引
     result = result.reset_index()
@@ -380,7 +476,8 @@ def aggregate_daily_data(
         '总销量', 'FBM订单', 'FBA订单', '广告单',
         '总销售额', '优惠券订单数', '优惠券折扣总额', '实际销售额',
         '总平台佣金', '总FBA费', '总广告花费',
-        '今日退款数量', '今日退款金额', 'FBM运费'
+        '今日退款数量', '今日退款金额', 'FBM运费',
+        '总采购成本', '总头程成本', '回款', '利润'
     ]
     result = result[columns_order]
 
