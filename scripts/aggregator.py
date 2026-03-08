@@ -467,6 +467,11 @@ def aggregate_daily_data(
     # 利润 = 回款 - 采购 - 头程
     result['利润'] = result['回款'] - result['总采购成本'] - result['总头程成本']
 
+    # TAcos = 总广告花费 / 实际销售额（百分比，实际销售额为0时TAcos为0）
+    result['TAcos'] = result.apply(
+        lambda r: round(r['总广告花费'] / r['实际销售额'], 4) if r['实际销售额'] > 0 else 0, axis=1
+    )
+
     # 重置索引
     result = result.reset_index()
 
@@ -477,7 +482,7 @@ def aggregate_daily_data(
         '总销售额', '优惠券订单数', '优惠券折扣总额', '实际销售额',
         '总平台佣金', '总FBA费', '总广告花费',
         '今日退款数量', '今日退款金额', 'FBM运费',
-        '总采购成本', '总头程成本', '回款', '利润'
+        '总采购成本', '总头程成本', '回款', '利润', 'TAcos'
     ]
     result = result[columns_order]
 
