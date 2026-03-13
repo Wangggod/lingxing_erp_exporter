@@ -118,6 +118,19 @@ def preprocess_product_data(
 
     saved_files = {}
 
+    # 处理商品表现
+    perf_csv = product_dir / "product_performance.csv"
+    if perf_csv.exists():
+        df_perf = pd.read_csv(perf_csv)
+        feishu_date = format_date_for_feishu(date_str)
+        df_perf.insert(0, "站点日期", feishu_date)
+        output_path = output_dir / "product_performance_ready.csv"
+        df_perf.to_csv(output_path, index=False, encoding="utf-8-sig")
+        log.info(f"[商品表现] 预处理完成: {len(df_perf)} 行")
+        saved_files["performance"] = output_path
+    else:
+        log.warning(f"文件不存在，跳过: {perf_csv}")
+
     # 处理订单列表
     list_csv = product_dir / "order_list.csv"
     if list_csv.exists():

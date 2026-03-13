@@ -142,6 +142,48 @@ def add_field(app_token: str, table_id: str, field_name: str, field_type: int, a
     return result["data"]
 
 
+def set_bitable_permission(app_token: str, access_token: str):
+    """设置多维表格权限：组织内链接可阅读，并授予管理员完全访问权限。"""
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json"
+    }
+
+    # 1. 组织内链接可阅读
+    url = f"https://open.feishu.cn/open-apis/drive/v1/permissions/{app_token}/public"
+    payload = {
+        "external_access_entity": "open",
+        "security_entity": "anyone_can_view",
+        "comment_entity": "anyone_can_view",
+        "share_entity": "anyone",
+        "link_share_entity": "tenant_readable",
+        "invite_external": True
+    }
+    response = requests.patch(url, headers=headers, json=payload, params={"type": "bitable"})
+    if response.status_code == 200 and response.json().get("code") == 0:
+        log.info("✅ 权限设置完成：组织内链接可阅读")
+    else:
+        log.warning(f"⚠️ 链接权限设置失败: {response.text}")
+
+    # 2. 授予管理员完全访问权限
+    admin_user_id = "ou_49b9c50170839a6ef4c87eaa015a7b5d"
+    member_url = f"https://open.feishu.cn/open-apis/drive/v1/permissions/{app_token}/members"
+    resp = requests.post(
+        member_url,
+        headers=headers,
+        params={"type": "bitable", "need_notification": "false"},
+        json={
+            "member_type": "openid",
+            "member_id": admin_user_id,
+            "perm": "full_access"
+        }
+    )
+    if resp.status_code == 200 and resp.json().get("code") == 0:
+        log.info("✅ 管理员权限授予完成")
+    else:
+        log.warning(f"⚠️ 管理员权限授予失败: {resp.text}")
+
+
 def create_summary_bitable(product_name: str, config: dict = None) -> dict:
     """
     创建每日汇总多维表格，包含所有字段。
@@ -187,23 +229,40 @@ def create_summary_bitable(product_name: str, config: dict = None) -> dict:
 
     # 3. 添加字段（跳过第一个默认的文本字段）
     fields = [
-        ("站点日期", 5),      # 日期
-        ("国家", 1),          # 文本
-        ("货币", 1),          # 文本
-        ("总销量", 2),        # 数字
-        ("FBM订单", 2),       # 数字
-        ("FBA订单", 2),       # 数字
-        ("广告单", 2),        # 数字
-        ("总销售额", 2),      # 数字
-        ("优惠券订单数", 2),  # 数字
-        ("总广告花费", 2),    # 数字
-        ("今日退款数量", 2),  # 数字
-        ("今日退款金额", 2),  # 数字
-        ("FBM运费", 2),       # 数字
+        ("unique_key", 1),      # 文本（幂等 upsert 用）
+        ("站点日期", 5),        # 日期
+        ("国家", 1),            # 文本
+        ("货币", 1),            # 文本
+        ("总销量", 2),          # 数字
+        ("FBM订单", 2),         # 数字
+        ("FBA订单", 2),         # 数字
+        ("广告单", 2),          # 数字
+        ("总销售额", 2),        # 数字
+        ("优惠券订单数", 2),    # 数字
+        ("优惠券折扣总额", 2),  # 数字
+        ("实际销售额", 2),      # 数字
+        ("总平台佣金", 2),      # 数字
+        ("总FBA费", 2),         # 数字
+        ("总广告花费", 2),      # 数字
+        ("今日退款数量", 2),    # 数字
+        ("今日退款金额", 2),    # 数字
+        ("FBM运费", 2),         # 数字
+        ("总采购成本", 2),      # 数字
+        ("总头程成本", 2),      # 数字
+        ("回款", 2),            # 数字
+        ("利润", 2),            # 数字
+        ("TAcos", 2),           # 数字
+        ("Sessions", 2),        # 数字
+        ("PV", 2),              # 数字
+        ("CPC", 2),             # 数字
+        ("广告CVR", 2),         # 数字
     ]
 
     for field_name, field_type in fields:
         add_field(app_token, table_id, field_name, field_type, access_token)
+
+    # 4. 设置权限：组织内链接可阅读
+    set_bitable_permission(app_token, access_token)
 
     log.info("=" * 60)
     log.info("✅ 多维表格创建完成！")

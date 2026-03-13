@@ -277,6 +277,43 @@ def export_fbm_shipment(page: Page, report: dict, target_date: str) -> str:
     return _fallback_click_download(page, report["name"])
 
 
+# ── 商品表现（与订单列表相同的通知弹窗模式）────────
+
+def export_product_performance(page: Page, report: dict, target_date: str) -> str:
+    # 先清除页面上已有的通知弹窗
+    page.evaluate("""() => {
+        document.querySelectorAll('.el-notification').forEach(n => n.remove());
+    }""")
+
+    body = {
+        "start_date": target_date,
+        "end_date": target_date,
+        **report.get("extra_params", {}),
+    }
+
+    result = _xhr_post_with_retry(page, report["export_url"], body)
+
+    if _is_session_expired(result):
+        raise SessionExpiredError(f"[{report['name']}] 会话已失效，需要重新登录: {result}")
+
+    if result.get("code") != 1:
+        raise RuntimeError(f"[{report['name']}] 导出任务创建失败: {result}")
+
+    log.info("[%s] 导出请求已发送，等待通知弹窗...", report["name"])
+
+    # 等待通知弹窗中的 span[data-id] 出现
+    try:
+        el = page.wait_for_selector(_NOTIFICATION_SELECTOR, timeout=30000)
+        report_id = el.get_attribute("data-id")
+        if report_id:
+            log.info("[%s] 从通知弹窗获取 report_id=%s", report["name"], report_id)
+            return report_id
+    except Exception:
+        log.warning("[%s] 通知弹窗未出现，尝试兜底方案...", report["name"])
+
+    return _fallback_click_download(page, report["name"])
+
+
 # ── 下载 ─────────────────────────────────────────────
 
 def download_report(page: Page, cfg: dict, report_id: str, report_name: str, report_type: str, target_date: str) -> Path:
@@ -311,6 +348,7 @@ _EXPORT_HANDLERS = {
     "order_profit": export_order_profit,
     "order_list": export_order_list,
     "fbm_shipment": export_fbm_shipment,
+    "product_performance": export_product_performance,
 }
 
 

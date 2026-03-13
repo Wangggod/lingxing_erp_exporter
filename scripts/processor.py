@@ -28,7 +28,8 @@ def filter_by_product(
     if source_files is None:
         source_files = {
             "profit": "order_profit.xlsx",
-            "list": "order_list.xlsx"
+            "list": "order_list.xlsx",
+            "performance": "product_performance.xlsx"
         }
 
     # 在 processed 目录下创建产品子目录

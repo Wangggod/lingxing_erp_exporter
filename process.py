@@ -1,11 +1,16 @@
 """数据处理入口：筛选特定产品的数据"""
 
+import json
 from datetime import datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 from scripts.processor import process_date
 from scripts.logger import setup_logger
 
 log = setup_logger()
+
+ROOT = Path(__file__).resolve().parent
+PRODUCTS_CONFIG = ROOT / "config" / "products.json"
 
 
 def get_target_date() -> str:
@@ -15,25 +20,28 @@ def get_target_date() -> str:
     return (now_la - timedelta(days=1)).strftime("%Y-%m-%d")
 
 
-def main():
-    # 配置
-    PRODUCT_NAME = "半开猫砂盆"
+def load_products() -> dict:
+    with open(PRODUCTS_CONFIG, encoding="utf-8") as f:
+        return json.load(f)
 
-    # 获取目标日期（与下载逻辑保持一致）
+
+def main():
+    products = load_products()
     target_date = get_target_date()
 
-    log.info(f"开始处理数据 - 日期: {target_date}, 产品: {PRODUCT_NAME}")
+    for product_name in products:
+        log.info(f"开始处理数据 - 日期: {target_date}, 产品: {product_name}")
 
-    try:
-        saved_files = process_date(target_date, PRODUCT_NAME)
+        try:
+            saved_files = process_date(target_date, product_name)
 
-        log.info("处理完成！保存的文件:")
-        for file_type, path in saved_files.items():
-            log.info(f"  [{file_type}] {path}")
+            log.info(f"[{product_name}] 处理完成！保存的文件:")
+            for file_type, path in saved_files.items():
+                log.info(f"  [{file_type}] {path}")
 
-    except Exception:
-        log.exception("数据处理失败")
-        raise
+        except Exception:
+            log.exception(f"[{product_name}] 数据处理失败")
+            raise
 
 
 if __name__ == "__main__":

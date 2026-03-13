@@ -37,11 +37,21 @@ error() {
 TODAY=$(date +%Y-%m-%d)
 MARKER_FILE="$HOME/.lingxing_etl_${TODAY}.done"
 
-# 检查当前时间是否已到 16:30
+# 自动判断美国太平洋时区是否夏令时，决定执行时间
+# 夏令时 PDT (UTC-7)：美国日终 = 北京 15:00 → 15:30 执行
+# 冬令时 PST (UTC-8)：美国日终 = 北京 16:00 → 16:30 执行
+US_OFFSET=$(TZ="America/Los_Angeles" date +%z)  # -0700 or -0800
+if [ "$US_OFFSET" = "-0700" ]; then
+    RUN_HOUR=15
+else
+    RUN_HOUR=16
+fi
+RUN_MINUTE=30
+
 CURRENT_HOUR=$(date +%H)
 CURRENT_MINUTE=$(date +%M)
-if [ "$CURRENT_HOUR" -lt 16 ] || { [ "$CURRENT_HOUR" -eq 16 ] && [ "$CURRENT_MINUTE" -lt 30 ]; }; then
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 当前时间早于 16:30，跳过" | tee -a "$LOG_FILE"
+if [ "$CURRENT_HOUR" -lt "$RUN_HOUR" ] || { [ "$CURRENT_HOUR" -eq "$RUN_HOUR" ] && [ "$CURRENT_MINUTE" -lt "$RUN_MINUTE" ]; }; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 当前时间早于 ${RUN_HOUR}:${RUN_MINUTE}（美区${US_OFFSET}），跳过" | tee -a "$LOG_FILE"
     exit 0
 fi
 

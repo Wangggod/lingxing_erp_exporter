@@ -231,7 +231,8 @@ def aggregate_daily_data(
     order_list_csv: Path,
     order_profit_csv: Path,
     output_path: Path = None,
-    date_str: str = None
+    date_str: str = None,
+    product_performance_csv: Path = None
 ) -> pd.DataFrame:
     """
     聚合每日数据，按日期-国家汇总。
@@ -472,6 +473,57 @@ def aggregate_daily_data(
         lambda r: round(r['总广告花费'] / r['实际销售额'], 4) if r['实际销售额'] > 0 else 0, axis=1
     )
 
+    # ========== 从 product_performance 聚合（流量 + 广告效率）==========
+
+    result['Sessions'] = 0
+    result['PV'] = 0
+    result['广告CVR'] = 0.0
+    result['CPC'] = 0.0
+
+    if product_performance_csv and product_performance_csv.exists():
+        perf_df = pd.read_csv(product_performance_csv)
+        log.info(f"读取商品表现: {len(perf_df)} 行")
+
+        # 确保数值列为数字类型
+        for col in ['Sessions-Total', 'PV-Total', '点击', '广告花费', '广告订单量']:
+            if col in perf_df.columns:
+                perf_df[col] = pd.to_numeric(perf_df[col], errors='coerce').fillna(0)
+
+        if '国家' in perf_df.columns and '站点日期' in perf_df.columns:
+            perf_agg = perf_df.groupby(['站点日期', '国家']).agg({
+                'Sessions-Total': 'sum',
+                'PV-Total': 'sum',
+                '点击': 'sum',
+                '广告花费': lambda x: abs(x).sum(),
+                '广告订单量': 'sum',
+            })
+
+            # CPC = 总广告花费 / 总点击数
+            perf_agg['CPC'] = perf_agg.apply(
+                lambda r: round(r['广告花费'] / r['点击'], 2) if r['点击'] > 0 else 0, axis=1
+            )
+            # 广告CVR = 总广告订单量 / 总点击数
+            perf_agg['广告CVR'] = perf_agg.apply(
+                lambda r: round(r['广告订单量'] / r['点击'], 4) if r['点击'] > 0 else 0, axis=1
+            )
+
+            perf_agg = perf_agg.rename(columns={
+                'Sessions-Total': 'Sessions',
+                'PV-Total': 'PV',
+            })
+
+            # 合并到结果
+            for col in ['Sessions', 'PV', 'CPC', '广告CVR']:
+                if col in perf_agg.columns:
+                    result[col] = perf_agg[col]
+
+            result['Sessions'] = result['Sessions'].fillna(0).astype(int)
+            result['PV'] = result['PV'].fillna(0).astype(int)
+            result['CPC'] = result['CPC'].fillna(0)
+            result['广告CVR'] = result['广告CVR'].fillna(0)
+    else:
+        log.info("无商品表现数据，流量字段填 0")
+
     # 重置索引
     result = result.reset_index()
 
@@ -482,7 +534,8 @@ def aggregate_daily_data(
         '总销售额', '优惠券订单数', '优惠券折扣总额', '实际销售额',
         '总平台佣金', '总FBA费', '总广告花费',
         '今日退款数量', '今日退款金额', 'FBM运费',
-        '总采购成本', '总头程成本', '回款', '利润', 'TAcos'
+        '总采购成本', '总头程成本', '回款', '利润', 'TAcos',
+        'Sessions', 'PV', 'CPC', '广告CVR'
     ]
     result = result[columns_order]
 
@@ -525,6 +578,9 @@ def aggregate_product_data(
     if not order_profit_csv.exists():
         raise FileNotFoundError(f"文件不存在: {order_profit_csv}")
 
+    # 商品表现文件（可选）
+    product_performance_csv = product_dir / "product_performance_ready.csv"
+
     # 输出文件
     output_path = output_dir / "daily_summary.csv"
 
@@ -533,7 +589,10 @@ def aggregate_product_data(
     log.info(f"开始聚合数据 - 日期: {date_str}")
     log.info("=" * 60)
 
-    result_df = aggregate_daily_data(order_list_csv, order_profit_csv, output_path, date_str=date_str)
+    result_df = aggregate_daily_data(
+        order_list_csv, order_profit_csv, output_path,
+        date_str=date_str, product_performance_csv=product_performance_csv
+    )
 
     log.info("=" * 60)
     log.info("聚合结果预览:")
