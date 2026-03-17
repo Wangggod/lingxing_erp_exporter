@@ -330,7 +330,14 @@ def download_report(page: Page, cfg: dict, report_id: str, report_name: str, rep
     date_dir.mkdir(parents=True, exist_ok=True)
 
     with page.expect_download(timeout=60000) as dl_info:
-        page.evaluate("url => window.open(url)", url)
+        page.evaluate("""url => {
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = '';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+        }""", url)
     download = dl_info.value
 
     # 使用固定的文件名：order_profit.xlsx 或 order_list.xlsx
