@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from scripts.logger import setup_logger
 from scripts.fbm_rates import get_estimated_shipping
+from scripts.inventory import aggregate_inventory
 
 log = setup_logger()
 
@@ -232,7 +233,9 @@ def aggregate_daily_data(
     order_profit_csv: Path,
     output_path: Path = None,
     date_str: str = None,
-    product_performance_csv: Path = None
+    product_performance_csv: Path = None,
+    fba_inventory_path: Path = None,
+    merchant_list_path: Path = None,
 ) -> pd.DataFrame:
     """
     聚合每日数据，按日期-国家汇总。
@@ -527,6 +530,36 @@ def aggregate_daily_data(
     else:
         log.info("无商品表现数据，流量字段填 0")
 
+    # ========== 从 FBA 库存聚合 ==========
+
+    inv_cols = ['FBA可售', 'FBA待调仓', 'FBA调仓中',
+                '库龄_90天内', '库龄_91到180天', '库龄_181到365天', '库龄_超365天']
+    for col in inv_cols:
+        result[col] = 0
+
+    if fba_inventory_path and fba_inventory_path.exists() and merchant_list_path and merchant_list_path.exists():
+        product_names = list(list_df['品名'].unique())
+        inv_agg = aggregate_inventory(fba_inventory_path, merchant_list_path, product_names)
+
+        if not inv_agg.empty:
+            # inv_agg index 为 (国家, 品名)，需要和 result 的 (站点日期, 国家, 品名) 对齐
+            # 库存是快照，同一天所有站点日期行共享同一份库存
+            for col in inv_cols:
+                if col in inv_agg.columns:
+                    # 按 (国家, 品名) 映射到 result
+                    inv_map = inv_agg[col].to_dict()
+                    result[col] = result.apply(
+                        lambda r: inv_map.get((r.name[1], r.name[2]), 0)
+                        if isinstance(r.name, tuple) and len(r.name) >= 3
+                        else 0,
+                        axis=1
+                    )
+
+        for col in inv_cols:
+            result[col] = result[col].fillna(0).astype(int)
+    else:
+        log.info("无FBA库存数据，库存字段填 0")
+
     # 重置索引
     result = result.reset_index()
 
@@ -538,7 +571,9 @@ def aggregate_daily_data(
         '总平台佣金', '总FBA费', '总广告花费',
         '今日退款数量', '今日退款金额', 'FBM运费',
         '总采购成本', '总头程成本', '回款', '利润', 'TAcos',
-        'Sessions', 'PV', 'CPC', '广告CVR'
+        'Sessions', 'PV', 'CPC', '广告CVR',
+        'FBA可售', 'FBA待调仓', 'FBA调仓中',
+        '库龄_90天内', '库龄_91到180天', '库龄_181到365天', '库龄_超365天',
     ]
     result = result[columns_order]
 
@@ -584,6 +619,11 @@ def aggregate_product_data(
     # 商品表现文件（可选）
     product_performance_csv = product_dir / "product_performance_ready.csv"
 
+    # FBA库存 + 店铺列表（可选，从 raw 目录读取）
+    raw_date_dir = product_dir.parent.parent.parent.parent / "raw" / date_str
+    fba_inventory_path = raw_date_dir / "fba_inventory.xlsx"
+    merchant_list_path = raw_date_dir / "merchant_list.xlsx"
+
     # 输出文件
     output_path = output_dir / "daily_summary.csv"
 
@@ -594,7 +634,8 @@ def aggregate_product_data(
 
     result_df = aggregate_daily_data(
         order_list_csv, order_profit_csv, output_path,
-        date_str=date_str, product_performance_csv=product_performance_csv
+        date_str=date_str, product_performance_csv=product_performance_csv,
+        fba_inventory_path=fba_inventory_path, merchant_list_path=merchant_list_path,
     )
 
     log.info("=" * 60)

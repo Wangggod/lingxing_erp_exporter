@@ -314,6 +314,26 @@ def export_product_performance(page: Page, report: dict, target_date: str) -> st
     return _fallback_click_download(page, report["name"])
 
 
+# ── FBA库存（快照型，无日期参数，响应体返回 report_id）───
+
+def export_fba_inventory(page: Page, report: dict, target_date: str) -> str:
+    body = {
+        **report.get("extra_params", {}),
+    }
+
+    result = _xhr_post_with_retry(page, report["export_url"], body)
+
+    if _is_session_expired(result):
+        raise SessionExpiredError(f"[{report['name']}] 会话已失效，需要重新登录: {result}")
+
+    if result.get("code") != 1:
+        raise RuntimeError(f"[{report['name']}] 导出任务创建失败: {result}")
+
+    report_id = result["data"]["report_id"]
+    log.info("[%s] 导出任务已创建, report_id=%s", report["name"], report_id)
+    return report_id
+
+
 # ── 下载 ─────────────────────────────────────────────
 
 def download_report(page: Page, cfg: dict, report_id: str, report_name: str, report_type: str, target_date: str) -> Path:
@@ -348,20 +368,78 @@ def download_report(page: Page, cfg: dict, report_id: str, report_name: str, rep
     return dest
 
 
+# ── 店铺列表（GET 直接返回文件流，无需下载中心）─────
+
+_XHR_GET_BLOB_JS = """url => {
+    function getCookie(name) {
+        const m = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+        return m ? decodeURIComponent(m[1]) : '';
+    }
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', url, true);
+        xhr.responseType = 'blob';
+        xhr.setRequestHeader('auth-token', getCookie('auth-token'));
+        xhr.setRequestHeader('X-AK-Company-Id', getCookie('company_id'));
+        xhr.setRequestHeader('X-AK-Env-Key', getCookie('envKey'));
+        xhr.setRequestHeader('authToken', getCookie('authToken'));
+        xhr.setRequestHeader('token', getCookie('token'));
+        xhr.withCredentials = true;
+        xhr.onload = () => {
+            if (xhr.status !== 200) {
+                reject(new Error('HTTP ' + xhr.status));
+                return;
+            }
+            // 将 blob 转为 base64 传回 Python
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.readAsDataURL(xhr.response);
+        };
+        xhr.onerror = () => reject(new Error('XHR failed'));
+        xhr.send();
+    });
+}"""
+
+
+def download_merchant_list(page: Page, target_date: str) -> Path:
+    """直接 GET 下载店铺授权列表（同步返回文件流）。"""
+    import base64
+
+    url = "https://erp.lingxing.com/api/seller/exportSellerList?offset=0&length=20&sort_type=desc&searchField=seller_id"
+    log.info("[店铺列表] 开始下载...")
+
+    data_url = page.evaluate(_XHR_GET_BLOB_JS, url)
+
+    # data_url 格式: "data:application/...;base64,XXXX"
+    header, b64data = data_url.split(",", 1)
+    file_bytes = base64.b64decode(b64data)
+
+    date_dir = DOWNLOAD_DIR / target_date
+    date_dir.mkdir(parents=True, exist_ok=True)
+    dest = date_dir / "merchant_list.xlsx"
+    dest.write_bytes(file_bytes)
+
+    log.info("[店铺列表] 文件已保存: %s (%d bytes)", dest, len(file_bytes))
+    return dest
+
+
 # ── 主流程 ────────────────────────────────────────────
 
-# 报表类型 → 导出函数映射
+# 报表类型 → 导出函数映射（异步导出 + 下载中心）
 _EXPORT_HANDLERS = {
     "order_profit": export_order_profit,
     "order_list": export_order_list,
     "fbm_shipment": export_fbm_shipment,
     "product_performance": export_product_performance,
+    "fba_inventory": export_fba_inventory,
 }
 
 
 def _run_exports(page: Page, cfg: dict, target_date: str) -> None:
     """执行所有报表导出，抽取为独立函数方便重试。"""
     log.info("目标日期: %s", target_date)
+
+    # 异步报表：创建导出任务 → 等待 → 从下载中心下载
     for report in cfg["reports"]:
         name = report["name"]
         rtype = report["type"]
@@ -373,6 +451,9 @@ def _run_exports(page: Page, cfg: dict, target_date: str) -> None:
         log.info("[%s] 开始导出...", name)
         report_id = handler(page, report, target_date)
         download_report(page, cfg, report_id, name, rtype, target_date)
+
+    # 同步报表：GET 直接返回文件流
+    download_merchant_list(page, target_date)
 
 
 def run_for_date(target_date: str) -> None:

@@ -257,6 +257,13 @@ def create_summary_bitable(group_name: str, config: dict = None) -> dict:
         ("PV", 2),              # 数字
         ("CPC", 2),             # 数字
         ("广告CVR", 2),         # 数字
+        ("FBA可售", 2),         # 数字
+        ("FBA待调仓", 2),       # 数字
+        ("FBA调仓中", 2),       # 数字
+        ("库龄_90天内", 2),     # 数字
+        ("库龄_91到180天", 2),  # 数字
+        ("库龄_181到365天", 2), # 数字
+        ("库龄_超365天", 2),    # 数字
     ]
 
     for field_name, field_type in fields:
