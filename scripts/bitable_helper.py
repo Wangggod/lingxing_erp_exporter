@@ -184,12 +184,12 @@ def set_bitable_permission(app_token: str, access_token: str):
         log.warning(f"⚠️ 管理员权限授予失败: {resp.text}")
 
 
-def create_summary_bitable(product_name: str, config: dict = None) -> dict:
+def create_summary_bitable(group_name: str, config: dict = None) -> dict:
     """
     创建每日汇总多维表格，包含所有字段。
 
     Args:
-        product_name: 产品名称
+        group_name: 项目组名称
         config: 飞书配置
 
     Returns:
@@ -203,7 +203,7 @@ def create_summary_bitable(product_name: str, config: dict = None) -> dict:
     access_token = get_tenant_access_token(config["app_id"], config["app_secret"])
 
     # 1. 创建多维表格
-    bitable_name = f"{product_name}-每日汇总"
+    bitable_name = f"{group_name}-每日汇总"
     app_info = create_bitable(bitable_name, access_token=access_token)
     app_token = app_info["app_token"]
 
@@ -232,6 +232,7 @@ def create_summary_bitable(product_name: str, config: dict = None) -> dict:
         ("unique_key", 1),      # 文本（幂等 upsert 用）
         ("站点日期", 5),        # 日期
         ("国家", 1),            # 文本
+        ("品名", 1),            # 文本
         ("货币", 1),            # 文本
         ("总销量", 2),          # 数字
         ("FBM订单", 2),         # 数字

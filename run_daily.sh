@@ -91,7 +91,7 @@ log "Python 版本: $PYTHON_VERSION"
 
 # 4. 执行 ETL 流程
 log "----------------------------------------"
-log "步骤 1/5: 下载数据"
+log "步骤 1/6: 下载数据"
 log "----------------------------------------"
 if python main.py >> "$LOG_FILE" 2>> "$ERROR_LOG"; then
     log "✅ 下载完成"
@@ -101,7 +101,7 @@ else
 fi
 
 log "----------------------------------------"
-log "步骤 2/5: 筛选产品数据"
+log "步骤 2/6: 筛选产品数据"
 log "----------------------------------------"
 if python process.py >> "$LOG_FILE" 2>> "$ERROR_LOG"; then
     log "✅ 筛选完成"
@@ -111,7 +111,7 @@ else
 fi
 
 log "----------------------------------------"
-log "步骤 3/5: 预处理数据"
+log "步骤 3/6: 预处理数据"
 log "----------------------------------------"
 if python preprocess.py >> "$LOG_FILE" 2>> "$ERROR_LOG"; then
     log "✅ 预处理完成"
@@ -121,7 +121,7 @@ else
 fi
 
 log "----------------------------------------"
-log "步骤 4/5: 聚合数据"
+log "步骤 4/6: 聚合数据"
 log "----------------------------------------"
 if python aggregate.py >> "$LOG_FILE" 2>> "$ERROR_LOG"; then
     log "✅ 聚合完成"
@@ -131,13 +131,22 @@ else
 fi
 
 log "----------------------------------------"
-log "步骤 5/5: 上传到飞书多维表格"
+log "步骤 5/6: 上传到飞书多维表格"
 log "----------------------------------------"
 if python upload_to_bitable.py >> "$LOG_FILE" 2>> "$ERROR_LOG"; then
     log "✅ 上传完成"
 else
     error "上传失败"
     exit 1
+fi
+
+log "----------------------------------------"
+log "步骤 6/6: 同步订单到 SellerGhost"
+log "----------------------------------------"
+if python sync_to_sellerghost.py >> "$LOG_FILE" 2>> "$ERROR_LOG"; then
+    log "✅ SellerGhost 同步完成"
+else
+    error "SellerGhost 同步失败（非关键步骤，继续）"
 fi
 
 # 5. 数据清理（可选）

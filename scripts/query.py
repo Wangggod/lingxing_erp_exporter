@@ -1,18 +1,19 @@
 """数据查询模块：为 agent 和外部系统提供统一的数据查询接口
 
 用法:
-    # 自描述：查看可用字段、产品、日期范围（agent 应先调此命令）
+    # 自描述：查看可用字段、项目组、品名、日期范围（agent 应先调此命令）
     python -m scripts.query schema
 
     # 汇总查询
     python -m scripts.query summary --days 7 --fields 总销量,利润
-    python -m scripts.query summary --days 30 --products 半开猫砂盆 --country 美国
+    python -m scripts.query summary --days 30 --groups 半开猫砂盆 --country 美国
+    python -m scripts.query summary --days 7 --product-name 艾洛克保险箱TX9S
     python -m scripts.query summary --start 2026-02-01 --end 2026-02-28
 
     # 明细查询
     python -m scripts.query detail --order 114-1607332-5352268
-    python -m scripts.query detail --products 欧博尔面包机 --days 3 --status Shipped
-    python -m scripts.query detail --products 欧博尔面包机 --days 7 --fields 防重复编号,订单状态,ASIN
+    python -m scripts.query detail --groups 欧博尔面包机 --days 3 --status Shipped
+    python -m scripts.query detail --groups 欧博尔面包机 --days 7 --fields 防重复编号,订单状态,ASIN
 """
 
 import argparse
@@ -61,13 +62,20 @@ def _resolve_date_range(
     return all_dates[-1:]
 
 
+def _resolve_groups(groups: Optional[list[str]] = None) -> list[str]:
+    """解析目标项目组列表。"""
+    all_products = _load_products()
+    return groups if groups else list(all_products.keys())
+
+
 # ==================== 汇总查询 ====================
 
 def query_summary(
     days: Optional[int] = None,
     start: Optional[str] = None,
     end: Optional[str] = None,
-    products: Optional[list[str]] = None,
+    groups: Optional[list[str]] = None,
+    product_name: Optional[str] = None,
     country: Optional[str] = None,
     fields: Optional[list[str]] = None,
 ) -> dict:
@@ -77,16 +85,16 @@ def query_summary(
     Args:
         days: 最近 N 天
         start/end: 日期范围（YYYY-MM-DD）
-        products: 产品名列表，None 则返回所有产品
+        groups: 项目组名列表，None 则返回所有项目组
+        product_name: 按品名过滤（精确匹配）
         country: 按国家过滤
         fields: 只返回指定字段
 
     Returns:
-        {"query": "summary", "date_range": [...], "data": {产品: [记录]}}
+        {"query": "summary", "date_range": [...], "data": {项目组: [记录]}}
     """
     dates = _resolve_date_range(days, start, end)
-    all_products = _load_products()
-    target_products = products if products else list(all_products.keys())
+    target_groups = _resolve_groups(groups)
 
     result_data = {}
 
@@ -98,11 +106,18 @@ def query_summary(
         with open(json_path, encoding="utf-8") as f:
             daily = json.load(f)
 
-        for product_name in target_products:
-            if product_name not in daily.get("products", {}):
+        # 兼容旧格式（"products"）和新格式（"groups"）
+        group_data = daily.get("groups", daily.get("products", {}))
+
+        for group_name in target_groups:
+            if group_name not in group_data:
                 continue
 
-            records = daily["products"][product_name]
+            records = group_data[group_name]
+
+            # 按品名过滤
+            if product_name:
+                records = [r for r in records if r.get("品名") == product_name]
 
             # 按国家过滤
             if country:
@@ -110,11 +125,11 @@ def query_summary(
 
             # 按字段过滤
             if fields:
-                keep = ["站点日期", "国家"] + [f for f in fields if f not in ("站点日期", "国家")]
+                keep = ["站点日期", "国家", "品名"] + [f for f in fields if f not in ("站点日期", "国家", "品名")]
                 records = [{k: r[k] for k in keep if k in r} for r in records]
 
             if records:
-                result_data.setdefault(product_name, []).extend(records)
+                result_data.setdefault(group_name, []).extend(records)
 
     return {
         "query": "summary",
@@ -129,7 +144,8 @@ def query_detail(
     days: Optional[int] = None,
     start: Optional[str] = None,
     end: Optional[str] = None,
-    products: Optional[list[str]] = None,
+    groups: Optional[list[str]] = None,
+    product_name: Optional[str] = None,
     country: Optional[str] = None,
     fields: Optional[list[str]] = None,
     order: Optional[str] = None,
@@ -141,19 +157,19 @@ def query_detail(
     Args:
         days: 最近 N 天
         start/end: 日期范围
-        products: 产品名列表
+        groups: 项目组名列表
+        product_name: 按品名过滤
         country: 按国家过滤
         fields: 只返回指定字段
         order: 按订单号精确查找
         status: 按订单状态过滤（如 Shipped, Pending）
 
     Returns:
-        {"query": "detail", "date_range": [...], "data": {产品: [记录]}}
+        {"query": "detail", "date_range": [...], "data": {项目组: [记录]}}
     """
-    all_products = _load_products()
-    target_products = products if products else list(all_products.keys())
+    target_groups = _resolve_groups(groups)
 
-    # 订单号查询：扫描所有日期和产品
+    # 订单号查询：扫描所有日期和项目组
     if order:
         dates = _resolve_date_range(days, start, end) if (days or start or end) else _available_dates()
     else:
@@ -162,8 +178,8 @@ def query_detail(
     result_data = {}
 
     for date_str in dates:
-        for product_name in target_products:
-            csv_path = PROCESSED_DIR / date_str / "feishu-ready" / product_name / "order_list_ready.csv"
+        for group_name in target_groups:
+            csv_path = PROCESSED_DIR / date_str / "feishu-ready" / group_name / "order_list_ready.csv"
             if not csv_path.exists():
                 continue
 
@@ -174,6 +190,10 @@ def query_detail(
                 df = df[df["防重复编号"].astype(str) == order]
                 if df.empty:
                     continue
+
+            # 按品名
+            if product_name and "品名" in df.columns:
+                df = df[df["品名"] == product_name]
 
             # 按订单状态
             if status:
@@ -192,7 +212,7 @@ def query_detail(
                 df = df[keep]
 
             records = df.to_dict(orient="records")
-            result_data.setdefault(product_name, []).extend(records)
+            result_data.setdefault(group_name, []).extend(records)
 
         # 订单号查询找到就停
         if order and result_data:
@@ -209,15 +229,18 @@ def query_detail(
 
 def query_schema() -> dict:
     """
-    返回查询模块的自描述信息：可用产品、日期范围、字段列表。
-
-    字段列表从实际数据文件动态读取，新增聚合字段后自动可见，无需手动维护。
+    返回查询模块的自描述信息：可用项目组、品名映射、日期范围、字段列表。
 
     Returns:
-        {"products": [...], "date_range": [...], "summary_fields": [...], "detail_fields": [...]}
+        {"groups": {项目组: [品名]}, "date_range": [...], "summary_fields": [...], "detail_fields": [...]}
     """
     all_dates = _available_dates()
-    products = list(_load_products().keys())
+    products = _load_products()
+
+    # 构建项目组→品名映射
+    groups = {}
+    for group_name, config in products.items():
+        groups[group_name] = config.get("品名", [group_name])
 
     # summary_fields: 从最新的 daily_summary.json 动态读取
     summary_fields = []
@@ -226,9 +249,10 @@ def query_schema() -> dict:
         if json_path.exists():
             with open(json_path, encoding="utf-8") as f:
                 daily = json.load(f)
-            for product_records in daily.get("products", {}).values():
-                if product_records:
-                    summary_fields = list(product_records[0].keys())
+            group_data = daily.get("groups", daily.get("products", {}))
+            for group_records in group_data.values():
+                if group_records:
+                    summary_fields = list(group_records[0].keys())
                     break
             if summary_fields:
                 break
@@ -236,8 +260,8 @@ def query_schema() -> dict:
     # detail_fields: 从最新的 order_list_ready.csv 动态读取
     detail_fields = []
     for date_str in reversed(all_dates):
-        for product_name in products:
-            csv_path = PROCESSED_DIR / date_str / "feishu-ready" / product_name / "order_list_ready.csv"
+        for group_name in groups:
+            csv_path = PROCESSED_DIR / date_str / "feishu-ready" / group_name / "order_list_ready.csv"
             if csv_path.exists():
                 df = pd.read_csv(csv_path, nrows=0)
                 detail_fields = list(df.columns)
@@ -246,7 +270,7 @@ def query_schema() -> dict:
             break
 
     return {
-        "products": products,
+        "groups": groups,
         "date_range": [all_dates[0], all_dates[-1]] if all_dates else [],
         "summary_fields": summary_fields,
         "detail_fields": detail_fields,
@@ -260,14 +284,15 @@ def main():
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # schema
-    subparsers.add_parser("schema", help="查看可用字段、产品、日期范围")
+    subparsers.add_parser("schema", help="查看可用字段、项目组、品名、日期范围")
 
     # 共享参数
     def add_common_args(p):
         p.add_argument("--days", type=int, help="最近 N 天")
         p.add_argument("--start", help="起始日期（YYYY-MM-DD）")
         p.add_argument("--end", help="结束日期（YYYY-MM-DD）")
-        p.add_argument("--products", help="产品名（逗号分隔）")
+        p.add_argument("--groups", help="项目组名（逗号分隔）")
+        p.add_argument("--product-name", help="按品名过滤（精确匹配）")
         p.add_argument("--country", help="按国家过滤")
         p.add_argument("--fields", help="只返回指定字段（逗号分隔）")
 
@@ -290,18 +315,21 @@ def main():
         return
 
     # 解析列表参数
-    products = args.products.split(",") if args.products else None
+    groups = args.groups.split(",") if args.groups else None
     fields = args.fields.split(",") if args.fields else None
+    product_name = getattr(args, "product_name", None)
 
     if args.command == "summary":
         result = query_summary(
             days=args.days, start=args.start, end=args.end,
-            products=products, country=args.country, fields=fields,
+            groups=groups, product_name=product_name,
+            country=args.country, fields=fields,
         )
     elif args.command == "detail":
         result = query_detail(
             days=args.days, start=args.start, end=args.end,
-            products=products, country=args.country, fields=fields,
+            groups=groups, product_name=product_name,
+            country=args.country, fields=fields,
             order=args.order, status=args.status,
         )
 

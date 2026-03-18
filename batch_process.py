@@ -1,5 +1,6 @@
 """批量处理历史数据：下载、处理、上传"""
 
+import json
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -12,8 +13,16 @@ from scripts.logger import setup_logger
 
 log = setup_logger()
 
+ROOT = Path(__file__).resolve().parent
+PRODUCTS_CONFIG = ROOT / "config" / "products.json"
 
-def process_single_date(date_str: str, product_name: str, bitable_config: dict):
+
+def load_products() -> dict:
+    with open(PRODUCTS_CONFIG, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def process_single_date(date_str: str, group_name: str, product_names: list[str], bitable_config: dict):
     """处理单个日期的完整流程"""
     log.info("=" * 60)
     log.info(f"开始处理日期: {date_str}")
@@ -30,16 +39,16 @@ def process_single_date(date_str: str, product_name: str, bitable_config: dict):
 
         # 2. 筛选
         log.info(f"[{date_str}] 筛选产品数据...")
-        process_date(date_str, product_name)
+        process_date(date_str, group_name, product_names)
 
         # 3. 预处理
         log.info(f"[{date_str}] 预处理数据...")
-        product_dir = Path("data/processed") / date_str / product_name
+        product_dir = Path("data/processed") / date_str / group_name
         preprocess_product_data(product_dir, date_str)
 
         # 4. 聚合
         log.info(f"[{date_str}] 聚合数据...")
-        feishu_ready_dir = Path("data/processed") / date_str / "feishu-ready" / product_name
+        feishu_ready_dir = Path("data/processed") / date_str / "feishu-ready" / group_name
         aggregate_product_data(feishu_ready_dir, date_str)
 
         # 5. 上传
@@ -61,15 +70,18 @@ def main():
     parser = argparse.ArgumentParser(description="批量处理历史数据")
     parser.add_argument("--start", required=True, help="开始日期 (YYYY-MM-DD)")
     parser.add_argument("--end", required=True, help="结束日期 (YYYY-MM-DD)")
-    parser.add_argument("--product", default="半开猫砂盆", help="产品名称")
+    parser.add_argument("--group", required=True, help="项目组名称")
 
     args = parser.parse_args()
 
-    # 多维表格配置
-    bitable_config = {
-        "app_token": "MsYxbyF7yak7TGsZwrgc3SWunSb",
-        "table_id": "tbl94y30jp2DTTHu"
-    }
+    products = load_products()
+    if args.group not in products:
+        log.error(f"项目组 '{args.group}' 未在 products.json 中注册")
+        sys.exit(1)
+
+    group_config = products[args.group]
+    product_names = group_config["品名"]
+    bitable_config = {"app_token": group_config["app_token"], "table_id": group_config["table_id"]}
 
     # 解析日期范围
     start_date = datetime.strptime(args.start, "%Y-%m-%d")
@@ -86,7 +98,7 @@ def main():
     log.info(f"批量处理计划")
     log.info("=" * 60)
     log.info(f"日期范围: {args.start} ~ {args.end}")
-    log.info(f"产品: {args.product}")
+    log.info(f"项目组: {args.group}, 品名: {product_names}")
     log.info(f"总天数: {len(dates)}")
     log.info("=" * 60)
 
@@ -95,7 +107,7 @@ def main():
     failed_dates = []
 
     for date_str in dates:
-        success = process_single_date(date_str, args.product, bitable_config)
+        success = process_single_date(date_str, args.group, product_names, bitable_config)
         if success:
             success_count += 1
         else:

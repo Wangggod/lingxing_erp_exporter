@@ -29,18 +29,19 @@ def main():
     products = load_products()
     target_date = get_target_date()
 
-    for product_name in products:
-        log.info(f"开始处理数据 - 日期: {target_date}, 产品: {product_name}")
+    for group_name, config in products.items():
+        product_names = config["品名"]
+        log.info(f"开始处理数据 - 日期: {target_date}, 项目组: {group_name}, 品名: {product_names}")
 
         try:
-            saved_files = process_date(target_date, product_name)
+            saved_files = process_date(target_date, group_name, product_names)
 
-            log.info(f"[{product_name}] 处理完成！保存的文件:")
+            log.info(f"[{group_name}] 处理完成！保存的文件:")
             for file_type, path in saved_files.items():
                 log.info(f"  [{file_type}] {path}")
 
         except Exception:
-            log.exception(f"[{product_name}] 数据处理失败")
+            log.exception(f"[{group_name}] 数据处理失败")
             raise
 
 

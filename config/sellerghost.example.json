@@ -1,0 +1,13 @@
+{
+  "api_base": "https://sellerghost-production.up.railway.app",
+  "products": {
+    "欧博尔面包机": {
+      "admin_key": "租户的adminKey",
+      "product_id": "SellerGhost中的产品UUID"
+    },
+    "半开猫砂盆": {
+      "admin_key": "租户的adminKey",
+      "product_id": "产品UUID"
+    }
+  }
+}

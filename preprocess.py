@@ -30,24 +30,24 @@ def main():
     products = load_products()
     target_date = get_target_date()
 
-    for product_name in products:
-        log.info(f"开始预处理数据 - 日期: {target_date}, 产品: {product_name}")
+    for group_name in products:
+        log.info(f"开始预处理数据 - 日期: {target_date}, 项目组: {group_name}")
 
-        product_dir = PROCESSED_DIR / target_date / product_name
+        product_dir = PROCESSED_DIR / target_date / group_name
 
         if not product_dir.exists():
-            log.warning(f"[{product_name}] 产品数据目录不存在: {product_dir}，跳过")
+            log.warning(f"[{group_name}] 项目组数据目录不存在: {product_dir}，跳过")
             continue
 
         try:
             saved_files = preprocess_product_data(product_dir, target_date)
 
-            log.info(f"[{product_name}] 预处理完成！保存的文件:")
+            log.info(f"[{group_name}] 预处理完成！保存的文件:")
             for file_type, path in saved_files.items():
                 log.info(f"  [{file_type}] {path}")
 
         except Exception:
-            log.exception(f"[{product_name}] 数据预处理失败")
+            log.exception(f"[{group_name}] 数据预处理失败")
             raise
 
 

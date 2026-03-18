@@ -38,34 +38,35 @@ def main():
         help="指定日期（YYYY-MM-DD），默认为昨天"
     )
     parser.add_argument(
-        "--product",
-        help="指定产品名（默认处理所有产品）"
+        "--group",
+        help="指定项目组名（默认处理所有项目组）"
     )
     args = parser.parse_args()
 
     products = load_products()
     DATE = args.date if args.date else get_target_date()
 
-    # 支持只处理单个产品
-    if args.product:
-        if args.product not in products:
-            log.error(f"产品 '{args.product}' 未在 products.json 中注册")
+    # 支持只处理单个项目组
+    if args.group:
+        if args.group not in products:
+            log.error(f"项目组 '{args.group}' 未在 products.json 中注册")
             return
-        product_list = {args.product: products[args.product]}
+        group_list = {args.group: products[args.group]}
     else:
-        product_list = products
+        group_list = products
 
-    for product_name, bitable_config in product_list.items():
-        csv_path = Path(f"data/processed/{DATE}/feishu-ready/{product_name}/daily_summary.csv")
+    for group_name, group_config in group_list.items():
+        bitable_config = {"app_token": group_config["app_token"], "table_id": group_config["table_id"]}
+        csv_path = Path(f"data/processed/{DATE}/feishu-ready/{group_name}/daily_summary.csv")
 
         if not csv_path.exists():
-            log.warning(f"[{product_name}] 文件不存在: {csv_path}，跳过")
+            log.warning(f"[{group_name}] 文件不存在: {csv_path}，跳过")
             continue
 
         log.info("=" * 60)
         log.info(f"开始上传数据到多维表格")
         log.info(f"日期: {DATE}")
-        log.info(f"产品: {product_name}")
+        log.info(f"项目组: {group_name}")
         log.info(f"文件: {csv_path}")
         if args.force:
             log.info("⚠️  强制上传模式")
@@ -74,7 +75,7 @@ def main():
         try:
             result = upload_summary_to_bitable(csv_path, bitable_config, force=args.force)
 
-            print(f"\n[{product_name}] " + "=" * 50)
+            print(f"\n[{group_name}] " + "=" * 50)
             if result.get("skipped"):
                 print("⏭️  跳过上传（已上传过）")
                 print(f"原因: {result.get('reason')}")
@@ -88,7 +89,7 @@ def main():
             print("=" * 60)
 
         except Exception as e:
-            log.error(f"[{product_name}] 上传失败: {e}")
+            log.error(f"[{group_name}] 上传失败: {e}")
             raise
 
 

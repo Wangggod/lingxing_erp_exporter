@@ -262,8 +262,11 @@ def aggregate_daily_data(
 
     log.info(f"有效订单（排除 Canceled 和换货）: {len(valid_orders)} 行")
 
-    # 按日期-国家分组聚合
-    list_agg = valid_orders.groupby(['站点日期', '国家']).agg({
+    # 聚合维度：站点日期 × 国家 × 品名
+    group_keys = ['站点日期', '国家', '品名']
+
+    # 按日期-国家-品名分组聚合
+    list_agg = valid_orders.groupby(group_keys).agg({
         '订单币种': 'first',  # 货币（同一国家应该一致）
         '数量': 'sum',  # 总销量
     }).rename(columns={
@@ -272,19 +275,19 @@ def aggregate_daily_data(
     })
 
     # FBM订单（订单类型 = MFN）
-    fbm_orders = valid_orders[valid_orders['订单类型'] == 'MFN'].groupby(['站点日期', '国家'])['数量'].sum()
+    fbm_orders = valid_orders[valid_orders['订单类型'] == 'MFN'].groupby(group_keys)['数量'].sum()
     list_agg['FBM订单'] = fbm_orders
 
     # FBA订单（订单类型 = AFN）
     afn_orders = valid_orders[valid_orders['订单类型'] == 'AFN']
-    fba_orders = afn_orders.groupby(['站点日期', '国家'])['数量'].sum()
+    fba_orders = afn_orders.groupby(group_keys)['数量'].sum()
     list_agg['FBA订单'] = fba_orders
 
     # 总FBA费：订单自带非零值则直接用（Pending 亦然），为 0 才去历史查
     product_dir = order_list_csv.parent
     fba_fee_map = {}
     if date_str and len(afn_orders) > 0:
-        for (date, country), group in afn_orders.groupby(['站点日期', '国家']):
+        for (date, country, pname), group in afn_orders.groupby(group_keys):
             total_fee = 0.0
             for _, row in group.iterrows():
                 if row['FBA费'] != 0:
@@ -292,10 +295,10 @@ def aggregate_daily_data(
                 else:
                     fee_per_unit = get_fba_fee_per_unit(row['MSKU'], list_df, product_dir, date_str)
                     total_fee += fee_per_unit * int(row['数量'])
-            fba_fee_map[(date, country)] = total_fee
+            fba_fee_map[(date, country, pname)] = total_fee
 
     if fba_fee_map:
-        idx = pd.MultiIndex.from_tuples(fba_fee_map.keys(), names=['站点日期', '国家'])
+        idx = pd.MultiIndex.from_tuples(fba_fee_map.keys(), names=group_keys)
         list_agg['总FBA费'] = pd.Series(fba_fee_map.values(), index=idx)
     else:
         list_agg['总FBA费'] = 0.0
@@ -303,7 +306,7 @@ def aggregate_daily_data(
     # 总平台佣金：订单自带非零值则直接用（Pending 亦然），为 0 才去历史查
     commission_map = {}
     if date_str and len(valid_orders) > 0:
-        for (date, country), group in valid_orders.groupby(['站点日期', '国家']):
+        for (date, country, pname), group in valid_orders.groupby(group_keys):
             total_commission = 0.0
             for _, row in group.iterrows():
                 if row['平台费'] != 0:
@@ -313,10 +316,10 @@ def aggregate_daily_data(
                         row['MSKU'], row['订单类型'], list_df, product_dir, date_str
                     )
                     total_commission += per_unit * int(row['数量'])
-            commission_map[(date, country)] = total_commission
+            commission_map[(date, country, pname)] = total_commission
 
     if commission_map:
-        idx = pd.MultiIndex.from_tuples(commission_map.keys(), names=['站点日期', '国家'])
+        idx = pd.MultiIndex.from_tuples(commission_map.keys(), names=group_keys)
         list_agg['总平台佣金'] = pd.Series(commission_map.values(), index=idx)
     else:
         list_agg['总平台佣金'] = 0.0
@@ -325,15 +328,15 @@ def aggregate_daily_data(
     fbm_orders = valid_orders[valid_orders['订单类型'] == 'MFN']
     fbm_shipping_map = {}
     if len(fbm_orders) > 0:
-        for (date, country), group in fbm_orders.groupby(['站点日期', '国家']):
+        for (date, country, pname), group in fbm_orders.groupby(group_keys):
             total_shipping = 0.0
             for _, row in group.iterrows():
                 per_unit = get_estimated_shipping(country, row['MSKU'])
                 total_shipping += per_unit * max(int(row['数量']), 1)
-            fbm_shipping_map[(date, country)] = round(total_shipping, 2)
+            fbm_shipping_map[(date, country, pname)] = round(total_shipping, 2)
 
     if fbm_shipping_map:
-        idx = pd.MultiIndex.from_tuples(fbm_shipping_map.keys(), names=['站点日期', '国家'])
+        idx = pd.MultiIndex.from_tuples(fbm_shipping_map.keys(), names=group_keys)
         list_agg['FBM运费'] = pd.Series(fbm_shipping_map.values(), index=idx)
     else:
         list_agg['FBM运费'] = 0.0
@@ -344,26 +347,26 @@ def aggregate_daily_data(
         (list_df['换货订单'] != '是') &
         (list_df['是否退货'] != '是')
     ].copy()
-    total_sales = valid_sales.groupby(['站点日期', '国家'])['单价'].sum()
+    total_sales = valid_sales.groupby(group_keys)['单价'].sum()
     list_agg['总销售额'] = total_sales
 
     # 优惠券订单数（促销编码不为空，排除 Canceled、换货和退货）
     coupon_df = valid_sales[valid_sales['促销编码'].notna() & (valid_sales['促销编码'] != '')]
-    coupon_orders = coupon_df.groupby(['站点日期', '国家']).size()
+    coupon_orders = coupon_df.groupby(group_keys).size()
     list_agg['优惠券订单数'] = coupon_orders
 
     # 优惠券折扣总额：按 日期-国家 分组，再按促销编码算 次数 × 面额
     coupon_discount_map = {}
     if date_str and len(coupon_df) > 0:
-        for (date, country), group in coupon_df.groupby(['站点日期', '国家']):
+        for (date, country, pname), group in coupon_df.groupby(group_keys):
             total_discount = 0.0
             for promo_code, code_group in group.groupby('促销编码'):
                 face_value = get_coupon_face_value(promo_code, list_df, product_dir, date_str)
                 total_discount += len(code_group) * face_value
-            coupon_discount_map[(date, country)] = total_discount
+            coupon_discount_map[(date, country, pname)] = total_discount
 
     if coupon_discount_map:
-        idx = pd.MultiIndex.from_tuples(coupon_discount_map.keys(), names=['站点日期', '国家'])
+        idx = pd.MultiIndex.from_tuples(coupon_discount_map.keys(), names=group_keys)
         list_agg['优惠券折扣总额'] = pd.Series(coupon_discount_map.values(), index=idx)
     else:
         list_agg['优惠券折扣总额'] = 0.0
@@ -379,7 +382,7 @@ def aggregate_daily_data(
 
     # ========== 从 order_profit 聚合 ==========
 
-    profit_agg = profit_df.groupby(['站点日期', '国家']).agg({
+    profit_agg = profit_df.groupby(group_keys).agg({
         '币种': 'first',  # 货币（用于填补 list 中缺失的货币）
         '广告销量': 'sum',  # 广告单
         '广告花费': lambda x: abs(x).sum(),  # 总广告花费（绝对值）
@@ -398,7 +401,7 @@ def aggregate_daily_data(
     purchase_cost_map = {}
     freight_cost_map = {}
     if date_str and len(profit_df) > 0:
-        for (date, country), group in profit_df.groupby(['站点日期', '国家']):
+        for (date, country, pname), group in profit_df.groupby(group_keys):
             total_purchase = 0.0
             total_freight = 0.0
             for _, row in group.iterrows():
@@ -416,17 +419,17 @@ def aggregate_daily_data(
                     get_unit_cost(country, '头程均价', profit_df, product_dir, date_str)
                 total_freight += freight_unit * qty
 
-            purchase_cost_map[(date, country)] = round(total_purchase, 2)
-            freight_cost_map[(date, country)] = round(total_freight, 2)
+            purchase_cost_map[(date, country, pname)] = round(total_purchase, 2)
+            freight_cost_map[(date, country, pname)] = round(total_freight, 2)
 
     if purchase_cost_map:
-        idx = pd.MultiIndex.from_tuples(purchase_cost_map.keys(), names=['站点日期', '国家'])
+        idx = pd.MultiIndex.from_tuples(purchase_cost_map.keys(), names=group_keys)
         profit_agg['总采购成本'] = pd.Series(purchase_cost_map.values(), index=idx)
     else:
         profit_agg['总采购成本'] = 0.0
 
     if freight_cost_map:
-        idx = pd.MultiIndex.from_tuples(freight_cost_map.keys(), names=['站点日期', '国家'])
+        idx = pd.MultiIndex.from_tuples(freight_cost_map.keys(), names=group_keys)
         profit_agg['总头程成本'] = pd.Series(freight_cost_map.values(), index=idx)
     else:
         profit_agg['总头程成本'] = 0.0
@@ -490,7 +493,7 @@ def aggregate_daily_data(
                 perf_df[col] = pd.to_numeric(perf_df[col], errors='coerce').fillna(0)
 
         if '国家' in perf_df.columns and '站点日期' in perf_df.columns:
-            perf_agg = perf_df.groupby(['站点日期', '国家']).agg({
+            perf_agg = perf_df.groupby(group_keys).agg({
                 'Sessions-Total': 'sum',
                 'PV-Total': 'sum',
                 '点击': 'sum',
@@ -529,7 +532,7 @@ def aggregate_daily_data(
 
     # 调整列顺序
     columns_order = [
-        '站点日期', '国家', '货币',
+        '站点日期', '国家', '品名', '货币',
         '总销量', 'FBM订单', 'FBA订单', '广告单',
         '总销售额', '优惠券订单数', '优惠券折扣总额', '实际销售额',
         '总平台佣金', '总FBA费', '总广告花费',
@@ -540,7 +543,7 @@ def aggregate_daily_data(
     result = result[columns_order]
 
     log.info(f"聚合完成: {len(result)} 行")
-    log.info(f"聚合维度: {result[['站点日期', '国家']].to_string(index=False)}")
+    log.info(f"聚合维度: {result[['站点日期', '国家', '品名']].to_string(index=False)}")
 
     # 保存
     if output_path:

@@ -25,17 +25,20 @@ class RateLimitError(Exception):
     pass
 
 
-def generate_unique_key(date_str: str, country: str) -> str:
+def generate_unique_key(date_str: str, country: str, product_name: str = None) -> str:
     """
     生成唯一键。
 
     Args:
         date_str: 日期字符串（YYYY-MM-DD）
         country: 国家
+        product_name: 品名（可选，有则加入 key）
 
     Returns:
-        唯一键字符串（格式：YYYY-MM-DD|国家）
+        唯一键字符串（格式：YYYY-MM-DD|国家|品名 或 YYYY-MM-DD|国家）
     """
+    if product_name:
+        return f"{date_str}|{country}|{product_name}"
     return f"{date_str}|{country}"
 
 
@@ -217,6 +220,7 @@ def prepare_fields(row: pd.Series, field_mapping: dict = None) -> Dict:
     fields = {}
     date_str = None
     country_str = None
+    product_name_str = None
 
     for col_name, value in row.items():
         # 应用字段映射
@@ -234,11 +238,13 @@ def prepare_fields(row: pd.Series, field_mapping: dict = None) -> Dict:
             fields[field_name] = timestamp_ms
             # 保存日期字符串用于生成 unique_key
             date_str = value if isinstance(value, str) else date_obj.strftime('%Y-%m-%d')
-        elif col_name in ['国家', '货币']:
+        elif col_name in ['国家', '货币', '品名']:
             # 文本字段
             fields[field_name] = str(value)
             if col_name == '国家':
                 country_str = str(value)
+            elif col_name == '品名':
+                product_name_str = str(value)
         else:
             # 数字字段
             if isinstance(value, (int, float)):
@@ -252,7 +258,7 @@ def prepare_fields(row: pd.Series, field_mapping: dict = None) -> Dict:
 
     # 添加 unique_key
     if date_str and country_str:
-        fields['unique_key'] = generate_unique_key(date_str, country_str)
+        fields['unique_key'] = generate_unique_key(date_str, country_str, product_name_str)
 
     return fields
 

@@ -41,32 +41,32 @@ def main():
     else:
         log.info(f"无自发货订单文件 ({fbm_shipment_path})，跳过费率更新")
 
-    aggregated_products = {}
+    aggregated_groups = {}
 
-    for product_name in products:
-        log.info(f"开始聚合数据 - 日期: {target_date}, 产品: {product_name}")
+    for group_name in products:
+        log.info(f"开始聚合数据 - 日期: {target_date}, 项目组: {group_name}")
 
-        feishu_ready_dir = PROCESSED_DIR / target_date / "feishu-ready" / product_name
+        feishu_ready_dir = PROCESSED_DIR / target_date / "feishu-ready" / group_name
 
         if not feishu_ready_dir.exists():
-            log.warning(f"[{product_name}] 数据目录不存在: {feishu_ready_dir}，跳过")
+            log.warning(f"[{group_name}] 数据目录不存在: {feishu_ready_dir}，跳过")
             continue
 
         try:
             output_path = aggregate_product_data(feishu_ready_dir, target_date)
-            log.info(f"[{product_name}] 聚合完成！文件: {output_path}")
+            log.info(f"[{group_name}] 聚合完成！文件: {output_path}")
 
             # 读取聚合结果用于合并 JSON
             df = pd.read_csv(output_path)
-            aggregated_products[product_name] = df.to_dict(orient="records")
+            aggregated_groups[group_name] = df.to_dict(orient="records")
 
         except Exception:
-            log.exception(f"[{product_name}] 数据聚合失败")
+            log.exception(f"[{group_name}] 数据聚合失败")
             raise
 
     # 生成全产品合并 JSON
-    if aggregated_products:
-        combined = {"date": target_date, "products": aggregated_products}
+    if aggregated_groups:
+        combined = {"date": target_date, "groups": aggregated_groups}
         json_path = PROCESSED_DIR / target_date / "daily_summary.json"
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(combined, f, ensure_ascii=False, indent=2)
