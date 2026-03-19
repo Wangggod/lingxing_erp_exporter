@@ -1,0 +1,53 @@
+// OpenClaw 配置片段 — 合并到 ~/.openclaw/openclaw.json
+// 需要替换的占位符：
+//   YOUR_HOOK_TOKEN    → webhook 认证 token（自定义强密码）
+//   oc_PATROL_GROUP_ID → 巡检群的飞书 group ID
+//   oc_REPORT_GROUP_ID → 日报群的飞书 group ID
+//   ou_ADMIN_USER_ID   → 管理员的飞书 user ID
+
+{
+  // Webhook 入口配置
+  hooks: {
+    enabled: true,
+    token: "YOUR_HOOK_TOKEN",
+    path: "/hooks",
+    defaultSessionKey: "hook:ingress",
+    allowedSessionKeyPrefixes: ["hook:"],
+  },
+
+  // 飞书频道配置
+  channels: {
+    feishu: {
+      enabled: true,
+      accounts: {
+        main: {
+          appId: "${FEISHU_APP_ID}",
+          appSecret: "${FEISHU_APP_SECRET}",
+          botName: "数据助手",
+        },
+      },
+      groups: {
+        // 巡检群：只有管理员可交互，不需要 @
+        "oc_PATROL_GROUP_ID": {
+          requireMention: false,
+          allowFrom: ["ou_ADMIN_USER_ID"],
+        },
+        // 日报群：团队可见，需要 @ 才响应
+        "oc_REPORT_GROUP_ID": {
+          requireMention: true,
+          // allowFrom: ["ou_ADMIN_USER_ID", "ou_MEMBER1", "ou_MEMBER2"],
+        },
+      },
+    },
+  },
+
+  // 心跳配置（巡检群用）
+  agents: {
+    defaults: {
+      heartbeat: {
+        every: "30m",
+        lightContext: true,
+      },
+    },
+  },
+}

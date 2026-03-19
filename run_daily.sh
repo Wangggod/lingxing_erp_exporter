@@ -21,6 +21,12 @@ VENV_DIR="$PROJECT_DIR/venv"
 # 数据保留天数（可选，如果要自动清理）
 DATA_RETENTION_DAYS=30
 
+# OpenClaw webhook 配置
+OPENCLAW_HOOK_URL="http://127.0.0.1:18789/hooks/agent"
+OPENCLAW_HOOK_TOKEN="${OPENCLAW_HOOK_TOKEN:-}"  # 从环境变量读取，或在此填写
+OPENCLAW_PATROL_GROUP="${OPENCLAW_PATROL_GROUP:-}"   # 巡检群 ID (oc_xxx)
+OPENCLAW_REPORT_GROUP="${OPENCLAW_REPORT_GROUP:-}"   # 日报群 ID (oc_xxx)
+
 # ==================== 函数 ====================
 
 log() {
@@ -29,6 +35,34 @@ log() {
 
 error() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $1" | tee -a "$ERROR_LOG"
+}
+
+notify_openclaw() {
+    local session_key="$1"
+    local target_group="$2"
+    local message="$3"
+
+    if [ -z "$OPENCLAW_HOOK_TOKEN" ]; then
+        log "⚠️ OPENCLAW_HOOK_TOKEN 未设置，跳过通知"
+        return 0
+    fi
+
+    curl -s -o /dev/null -w "%{http_code}" -X POST "$OPENCLAW_HOOK_URL" \
+        -H "Authorization: Bearer $OPENCLAW_HOOK_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{\"message\":\"$message\",\"sessionKey\":\"$session_key\",\"deliver\":true,\"channel\":\"feishu\",\"to\":\"$target_group\"}" || true
+}
+
+etl_fail() {
+    local step="$1"
+    error "$step 失败"
+    if [ -n "$OPENCLAW_HOOK_TOKEN" ] && [ -n "$OPENCLAW_PATROL_GROUP" ]; then
+        local last_lines
+        last_lines=$(tail -20 "$ERROR_LOG" 2>/dev/null | tr '"' "'" | tr '\n' ' ')
+        notify_openclaw "hook:etl-patrol" "$OPENCLAW_PATROL_GROUP" \
+            "ETL 失败于步骤 [$step]（$(date '+%Y-%m-%d %H:%M')）。错误摘要: $last_lines。请分析原因并尝试自愈。"
+    fi
+    exit 1
 }
 
 # ==================== 兜底机制 ====================
@@ -96,8 +130,7 @@ log "----------------------------------------"
 if python main.py >> "$LOG_FILE" 2>> "$ERROR_LOG"; then
     log "✅ 下载完成"
 else
-    error "下载失败"
-    exit 1
+    etl_fail "下载数据"
 fi
 
 log "----------------------------------------"
@@ -106,8 +139,7 @@ log "----------------------------------------"
 if python process.py >> "$LOG_FILE" 2>> "$ERROR_LOG"; then
     log "✅ 筛选完成"
 else
-    error "筛选失败"
-    exit 1
+    etl_fail "筛选产品数据"
 fi
 
 log "----------------------------------------"
@@ -116,8 +148,7 @@ log "----------------------------------------"
 if python preprocess.py >> "$LOG_FILE" 2>> "$ERROR_LOG"; then
     log "✅ 预处理完成"
 else
-    error "预处理失败"
-    exit 1
+    etl_fail "预处理数据"
 fi
 
 log "----------------------------------------"
@@ -126,8 +157,7 @@ log "----------------------------------------"
 if python aggregate.py >> "$LOG_FILE" 2>> "$ERROR_LOG"; then
     log "✅ 聚合完成"
 else
-    error "聚合失败"
-    exit 1
+    etl_fail "聚合数据"
 fi
 
 log "----------------------------------------"
@@ -136,8 +166,7 @@ log "----------------------------------------"
 if python upload_to_bitable.py >> "$LOG_FILE" 2>> "$ERROR_LOG"; then
     log "✅ 上传完成"
 else
-    error "上传失败"
-    exit 1
+    etl_fail "上传到飞书"
 fi
 
 log "----------------------------------------"
@@ -167,5 +196,23 @@ touch "$MARKER_FILE"
 log "=========================================="
 log "🎉 每日数据处理任务完成"
 log "=========================================="
+
+# ==================== OpenClaw 通知 ====================
+
+# 通知巡检群：确认数据完整性
+if [ -n "$OPENCLAW_PATROL_GROUP" ]; then
+    log "通知巡检群..."
+    notify_openclaw "hook:etl-patrol" "$OPENCLAW_PATROL_GROUP" \
+        "ETL 每日任务已完成（$(date '+%Y-%m-%d %H:%M')）。请巡检数据完整性：检查 data/raw/$TODAY/ 下 6 份报表是否齐全，检查 data/processed/$TODAY/daily_summary.json 是否存在且非空。如有异常请告警。"
+    log "✅ 巡检群已通知"
+fi
+
+# 通知日报群：生成并发送日报
+if [ -n "$OPENCLAW_REPORT_GROUP" ]; then
+    log "通知日报群..."
+    notify_openclaw "hook:daily-report" "$OPENCLAW_REPORT_GROUP" \
+        "ETL 数据已就绪。请执行 ./venv/bin/python -m scripts.query summary --days 1 获取今日全产品数据，按日报模板生成日报并发送。"
+    log "✅ 日报群已通知"
+fi
 
 exit 0

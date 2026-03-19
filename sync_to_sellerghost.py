@@ -65,9 +65,9 @@ def read_orders_from_csv(csv_path, product_id):
             }
 
             # 可选字段
-            email = row.get("买家邮箱", "").strip()
-            if email and "@" in email:
-                order["email"] = email
+            buyer_name = row.get("买家姓名", "").strip()
+            if buyer_name:
+                order["buyerName"] = buyer_name
 
             asin = row.get("ASIN", "").strip()
             if asin:
