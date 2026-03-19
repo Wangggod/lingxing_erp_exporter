@@ -41,16 +41,26 @@ notify_openclaw() {
     local session_key="$1"
     local target_group="$2"
     local message="$3"
+    local agent_id="${4:-}"
+    local model="${5:-}"
 
     if [ -z "$OPENCLAW_HOOK_TOKEN" ]; then
         log "⚠️ OPENCLAW_HOOK_TOKEN 未设置，跳过通知"
         return 0
     fi
 
+    local extra_fields=""
+    if [ -n "$agent_id" ]; then
+        extra_fields="${extra_fields},\"agentId\":\"$agent_id\""
+    fi
+    if [ -n "$model" ]; then
+        extra_fields="${extra_fields},\"model\":\"$model\""
+    fi
+
     curl -s -o /dev/null -w "%{http_code}" -X POST "$OPENCLAW_HOOK_URL" \
         -H "Authorization: Bearer $OPENCLAW_HOOK_TOKEN" \
         -H "Content-Type: application/json" \
-        -d "{\"message\":\"$message\",\"sessionKey\":\"$session_key\",\"deliver\":true,\"channel\":\"feishu\",\"to\":\"$target_group\"}" || true
+        -d "{\"message\":\"$message\",\"sessionKey\":\"$session_key\",\"deliver\":true,\"channel\":\"feishu\",\"to\":\"$target_group\"$extra_fields}" || true
 }
 
 etl_fail() {
@@ -60,7 +70,8 @@ etl_fail() {
         local last_lines
         last_lines=$(tail -20 "$ERROR_LOG" 2>/dev/null | tr '"' "'" | tr '\n' ' ')
         notify_openclaw "hook:etl-patrol" "$OPENCLAW_PATROL_GROUP" \
-            "ETL 失败于步骤 [$step]（$(date '+%Y-%m-%d %H:%M')）。错误摘要: $last_lines。请分析原因并尝试自愈。"
+            "ETL 失败于步骤 [$step]（$(date '+%Y-%m-%d %H:%M')）。错误摘要: $last_lines。请分析原因并尝试自愈。" \
+            "patrol" "openrouter/anthropic/claude-haiku-4-5"
     fi
     exit 1
 }
@@ -72,15 +83,15 @@ TODAY=$(date +%Y-%m-%d)
 MARKER_FILE="$HOME/.lingxing_etl_${TODAY}.done"
 
 # 自动判断美国太平洋时区是否夏令时，决定执行时间
-# 夏令时 PDT (UTC-7)：美国日终 = 北京 15:00 → 15:30 执行
-# 冬令时 PST (UTC-8)：美国日终 = 北京 16:00 → 16:30 执行
+# 夏令时 PDT (UTC-7)：美国日终 = 北京 15:00 → 15:20 执行
+# 冬令时 PST (UTC-8)：美国日终 = 北京 16:00 → 16:20 执行
 US_OFFSET=$(TZ="America/Los_Angeles" date +%z)  # -0700 or -0800
 if [ "$US_OFFSET" = "-0700" ]; then
     RUN_HOUR=15
 else
     RUN_HOUR=16
 fi
-RUN_MINUTE=30
+RUN_MINUTE=20
 
 CURRENT_HOUR=$(date +%H)
 CURRENT_MINUTE=$(date +%M)
@@ -203,7 +214,8 @@ log "=========================================="
 if [ -n "$OPENCLAW_PATROL_GROUP" ]; then
     log "通知巡检群..."
     notify_openclaw "hook:etl-patrol" "$OPENCLAW_PATROL_GROUP" \
-        "ETL 每日任务已完成（$(date '+%Y-%m-%d %H:%M')）。请巡检数据完整性：检查 data/raw/$TODAY/ 下 6 份报表是否齐全，检查 data/processed/$TODAY/daily_summary.json 是否存在且非空。如有异常请告警。"
+        "ETL 每日任务已完成（$(date '+%Y-%m-%d %H:%M')）。请巡检数据完整性：检查 data/raw/$TODAY/ 下 6 份报表是否齐全，检查 data/processed/$TODAY/daily_summary.json 是否存在且非空。如有异常请告警。" \
+        "patrol" "openrouter/anthropic/claude-haiku-4-5"
     log "✅ 巡检群已通知"
 fi
 
@@ -211,7 +223,8 @@ fi
 if [ -n "$OPENCLAW_REPORT_GROUP" ]; then
     log "通知日报群..."
     notify_openclaw "hook:daily-report" "$OPENCLAW_REPORT_GROUP" \
-        "ETL 数据已就绪。请执行 ./venv/bin/python -m scripts.query summary --days 1 获取今日全产品数据，按日报模板生成日报并发送。"
+        "ETL 数据已就绪。请执行 ./venv/bin/python -m scripts.query summary --days 1 获取今日全产品数据，按日报模板生成日报并发送。" \
+        "report" "openrouter/anthropic/claude-sonnet-4-6"
     log "✅ 日报群已通知"
 fi
 

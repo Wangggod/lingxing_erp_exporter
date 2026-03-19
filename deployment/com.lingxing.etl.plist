@@ -25,29 +25,30 @@
             <key>Hour</key>
             <integer>15</integer>
             <key>Minute</key>
-            <integer>30</integer>
+            <integer>20</integer>
         </dict>
         <dict>
             <key>Hour</key>
             <integer>16</integer>
             <key>Minute</key>
-            <integer>30</integer>
+            <integer>20</integer>
         </dict>
     </array>
 
+    <!-- 开机/登录时立即触发一次，由 run_daily.sh 内部判断是否需要执行 -->
     <key>RunAtLoad</key>
-    <false/>
+    <true/>
 
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
         <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
         <key>OPENCLAW_HOOK_TOKEN</key>
-        <string>YOUR_HOOK_TOKEN</string>
+        <string>8394dfcc44c1c7bc58a379a348ab2f8ef4ecc3a6c9938c1f</string>
         <key>OPENCLAW_PATROL_GROUP</key>
-        <string>oc_PATROL_GROUP_ID</string>
+        <string>oc_c142005c008b351c8587f8f8659877b8</string>
         <key>OPENCLAW_REPORT_GROUP</key>
-        <string>oc_REPORT_GROUP_ID</string>
+        <string>oc_77700e43d8bc2fc7bef35272f30048e8</string>
     </dict>
 
     <key>KeepAlive</key>
