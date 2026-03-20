@@ -340,31 +340,45 @@ def download_report(page: Page, cfg: dict, report_id: str, report_name: str, rep
     download_url = cfg["download_url"]
     wait = cfg.get("download_wait_seconds", 10)
 
-    log.info("[%s] 等待 %d 秒后下载...", report_name, wait)
-    time.sleep(wait)
-
     url = f"{download_url}?report_id={report_id}"
 
     # 创建按日期的子目录
     date_dir = DOWNLOAD_DIR / target_date
     date_dir.mkdir(parents=True, exist_ok=True)
-
-    with page.expect_download(timeout=60000) as dl_info:
-        page.evaluate("""url => {
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = '';
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-        }""", url)
-    download = dl_info.value
-
-    # 使用固定的文件名：order_profit.xlsx 或 order_list.xlsx
     filename = f"{report_type}.xlsx"
     dest = date_dir / filename
-    download.save_as(str(dest))
-    log.info("[%s] 文件已保存: %s", report_name, dest)
+
+    # 最多重试 3 次，每次加长等待（领星大报表生成慢）
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        current_wait = wait * (attempt + 1)  # 10s, 20s, 30s
+        log.info("[%s] 等待 %d 秒后下载（第 %d 次）...", report_name, current_wait, attempt + 1)
+        time.sleep(current_wait)
+
+        with page.expect_download(timeout=60000) as dl_info:
+            page.evaluate("""url => {
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = '';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+            }""", url)
+        download = dl_info.value
+        download.save_as(str(dest))
+
+        # 检查下载结果：小文件可能是错误 JSON
+        if dest.stat().st_size < 1024:
+            content = dest.read_bytes()
+            if content.startswith(b'{'):
+                log.warning("[%s] 下载中心返回错误（%dB），报表可能还在生成中", report_name, len(content))
+                if attempt < max_attempts - 1:
+                    continue
+                log.error("[%s] 重试 %d 次后仍失败: %s", report_name, max_attempts, content.decode(errors='replace')[:200])
+
+        log.info("[%s] 文件已保存: %s (%d bytes)", report_name, dest, dest.stat().st_size)
+        return dest
+
     return dest
 
 

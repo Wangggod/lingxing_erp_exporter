@@ -70,6 +70,14 @@ def aggregate_inventory(
         聚合后的 DataFrame，index 为 (国家, 品名)，
         列：FBA可售, FBA待调仓, FBA调仓中, 库龄_90天内, 库龄_91到180天, 库龄_181到365天, 库龄_超365天
     """
+    # 检测损坏文件（领星偶尔返回错误 JSON 而非 xlsx）
+    file_size = fba_inventory_path.stat().st_size
+    if file_size < 1024:
+        raw = fba_inventory_path.read_bytes()
+        if raw.startswith(b'{') or raw.startswith(b'<'):
+            log.warning(f"FBA库存文件损坏（{file_size}B），跳过库存聚合")
+            return pd.DataFrame()
+
     inv = pd.read_excel(fba_inventory_path)
     merchant = pd.read_excel(merchant_list_path)
     log.info(f"读取FBA库存: {len(inv)} 行, 店铺列表: {len(merchant)} 行")

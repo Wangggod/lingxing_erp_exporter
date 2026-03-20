@@ -539,7 +539,11 @@ def aggregate_daily_data(
 
     if fba_inventory_path and fba_inventory_path.exists() and merchant_list_path and merchant_list_path.exists():
         product_names = list(list_df['品名'].unique())
-        inv_agg = aggregate_inventory(fba_inventory_path, merchant_list_path, product_names)
+        try:
+            inv_agg = aggregate_inventory(fba_inventory_path, merchant_list_path, product_names)
+        except Exception as e:
+            log.warning(f"FBA库存聚合失败，跳过库存字段: {e}")
+            inv_agg = pd.DataFrame()
 
         if not inv_agg.empty:
             # inv_agg index 为 (国家, 品名)，需要和 result 的 (站点日期, 国家, 品名) 对齐
