@@ -18,6 +18,7 @@ import json
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -160,14 +161,18 @@ def main():
 
     # 确定要同步的日期列表
     if args.days:
+        now_la = datetime.now(ZoneInfo("Asia/Shanghai")).astimezone(ZoneInfo("America/Los_Angeles"))
+        base = now_la - timedelta(days=1)
         dates = [
-            (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+            (base - timedelta(days=i)).strftime("%Y-%m-%d")
             for i in range(args.days)
         ]
     elif args.date:
         dates = [args.date]
     else:
-        dates = [datetime.now().strftime("%Y-%m-%d")]
+        # 与 ETL 保持一致：美西时间前一天
+        now_la = datetime.now(ZoneInfo("Asia/Shanghai")).astimezone(ZoneInfo("America/Los_Angeles"))
+        dates = [(now_la - timedelta(days=1)).strftime("%Y-%m-%d")]
 
     mode = "预览模式" if args.dry_run else "同步模式"
     print(f"\n🔄 SellerGhost 订单同步 [{mode}]")
