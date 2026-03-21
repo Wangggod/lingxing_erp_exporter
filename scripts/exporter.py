@@ -463,7 +463,19 @@ def _run_exports(page: Page, cfg: dict, target_date: str) -> None:
             continue
 
         log.info("[%s] 开始导出...", name)
-        report_id = handler(page, report, target_date)
+        # 限流重试：领星返回"请勿频繁点击导出"时等待后重试
+        report_id = None
+        for attempt in range(3):
+            try:
+                report_id = handler(page, report, target_date)
+                break
+            except RuntimeError as e:
+                if "频繁" in str(e) and attempt < 2:
+                    wait = 60 * (attempt + 1)
+                    log.warning("[%s] 触发限流，等待 %d 秒后重试（%d/3）", name, wait, attempt + 1)
+                    time.sleep(wait)
+                    continue
+                raise
         download_report(page, cfg, report_id, name, rtype, target_date)
 
     # 同步报表：GET 直接返回文件流
